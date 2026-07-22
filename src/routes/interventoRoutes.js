@@ -119,7 +119,7 @@ router.get('/interventi/ultimi', authenticate, async (req, res) => {
   try {
     console.log('🔵 GET /interventi/ultimi - Inizio');
     const limit = req.query.limit || 10;
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin // ✅ MODIFICATO
       .from('interventi')
       .select(`
         id,
@@ -158,7 +158,7 @@ router.get('/interventi/ultimi', authenticate, async (req, res) => {
 router.get('/interventi', authenticate, async (req, res) => {
   try {
     console.log('🔵 GET /interventi - Inizio');
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin // ✅ MODIFICATO
       .from('interventi')
       .select(`
         *,
@@ -204,7 +204,7 @@ router.get('/interventi/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     console.log(`🔵 GET /interventi/${id} - Inizio`);
     
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin // ✅ MODIFICATO
       .from('interventi')
       .select(`
         *,
