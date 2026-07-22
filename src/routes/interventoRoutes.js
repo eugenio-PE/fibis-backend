@@ -28,90 +28,6 @@ router.post('/interventi', authenticate, requireOTP, registraIntervento);
 router.get('/storico/:asdId', authenticate, getStorico);
 
 // ============================================
-// STATISTICHE PER LA DASHBOARD (con DEBUG)
-// ============================================
-
-// Conteggio ASD
-router.get('/stats/asd', async (req, res) => {
-  try {
-    console.log('🔵 GET /stats/asd - Inizio');
-    const { count, error } = await supabase
-      .from('asd_centri')
-      .select('*', { count: 'exact', head: true });
-    
-    if (error) {
-      console.log('❌ Errore Supabase:', error);
-      throw error;
-    }
-    console.log('✅ Conteggio ASD:', count);
-    res.json(count || 0);
-  } catch (error) {
-    console.log('❌ Errore generale:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Conteggio Biliardi
-router.get('/stats/biliardi', async (req, res) => {
-  try {
-    console.log('🔵 GET /stats/biliardi - Inizio');
-    const { count, error } = await supabase
-      .from('biliardi')
-      .select('*', { count: 'exact', head: true });
-    
-    if (error) {
-      console.log('❌ Errore Supabase:', error);
-      throw error;
-    }
-    console.log('✅ Conteggio Biliardi:', count);
-    res.json(count || 0);
-  } catch (error) {
-    console.log('❌ Errore generale:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Conteggio Interventi
-router.get('/stats/interventi', async (req, res) => {
-  try {
-    console.log('🔵 GET /stats/interventi - Inizio');
-    const { count, error } = await supabase
-      .from('interventi')
-      .select('*', { count: 'exact', head: true });
-    
-    if (error) {
-      console.log('❌ Errore Supabase:', error);
-      throw error;
-    }
-    console.log('✅ Conteggio Interventi:', count);
-    res.json(count || 0);
-  } catch (error) {
-    console.log('❌ Errore generale:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Conteggio Manutentori
-router.get('/stats/manutentori', async (req, res) => {
-  try {
-    console.log('🔵 GET /stats/manutentori - Inizio');
-    const { count, error } = await supabase
-      .from('manutentori')
-      .select('*', { count: 'exact', head: true });
-    
-    if (error) {
-      console.log('❌ Errore Supabase:', error);
-      throw error;
-    }
-    console.log('✅ Conteggio Manutentori:', count);
-    res.json(count || 0);
-  } catch (error) {
-    console.log('❌ Errore generale:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
 // ULTIMI INTERVENTI PER LA DASHBOARD
 // ============================================
 
@@ -119,7 +35,7 @@ router.get('/interventi/ultimi', authenticate, async (req, res) => {
   try {
     console.log('🔵 GET /interventi/ultimi - Inizio');
     const limit = req.query.limit || 10;
-    const { data, error } = await supabaseAdmin // ✅ MODIFICATO
+    const { data, error } = await supabaseAdmin
       .from('interventi')
       .select(`
         id,
@@ -158,7 +74,10 @@ router.get('/interventi/ultimi', authenticate, async (req, res) => {
 router.get('/interventi', authenticate, async (req, res) => {
   try {
     console.log('🔵 GET /interventi - Inizio');
-    const { data, error } = await supabaseAdmin // ✅ MODIFICATO
+    const { asdId } = req.query;
+    
+    // Costruisci la query base
+    let query = supabaseAdmin
       .from('interventi')
       .select(`
         *,
@@ -172,8 +91,16 @@ router.get('/interventi', authenticate, async (req, res) => {
             nome
           )
         )
-      `)
-      .order('data_intervento', { ascending: false });
+      `);
+    
+    // Se asdId è fornito e non è 'tutte', filtra per ASD
+    if (asdId && asdId !== 'tutte') {
+      console.log(`🔵 Filtro per ASD ID: ${asdId}`);
+      // Filtra gli interventi basati sull'ASD attraverso la relazione biliardi
+      query = query.eq('biliardi.asd_centri.id', parseInt(asdId));
+    }
+    
+    const { data, error } = await query.order('data_intervento', { ascending: false });
 
     if (error) {
       console.log('❌ Errore Supabase:', error);
@@ -204,7 +131,7 @@ router.get('/interventi/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     console.log(`🔵 GET /interventi/${id} - Inizio`);
     
-    const { data, error } = await supabaseAdmin // ✅ MODIFICATO
+    const { data, error } = await supabaseAdmin
       .from('interventi')
       .select(`
         *,
