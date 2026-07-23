@@ -241,7 +241,8 @@ router.get('/biliardi', async (req, res) => {
       return res.status(400).json({ error: 'asdId richiesto' });
     }
 
-    const { data, error } = await supabase
+    
+    const { data, error } = await supabaseAdmin 
       .from('biliardi')
       .select('*')
       .eq('id_asd', parseInt(asdId))
