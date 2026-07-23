@@ -15,9 +15,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: [
     'https://fibis-admin.vercel.app',
-    'https://fibis-manutentori.vercel.app',
-    'https://fibis-direttori.vercel.app',
-    'https://fibis-presidenti.vercel.app',
+    'https://fibis_manutentori.vercel.app',     // ← underscores!
+    'https://fibis_direttori.vercel.app',      // ← underscores!
+    'https://fibis_presidenti.vercel.app',     // ← underscores!
     'http://localhost:5173',
     'http://localhost:3000'
   ],
