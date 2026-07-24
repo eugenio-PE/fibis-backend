@@ -204,6 +204,8 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
   }
 });
 
+
+
 // ============================================
 // LISTA ASD PER FILTRI (SOLO ADMIN)
 // ============================================
@@ -211,7 +213,7 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
 router.get('/asd', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     console.log('🔵 GET /asd - Inizio');
-    const { data, error } = await supabase  // ← CAMBIA: supabase (non supabaseAdmin)
+    const { data, error } = await supabaseAdmin  // ← CAMBIA QUI (era supabase)
       .from('asd_centri')
       .select('id, nome')
       .eq('attivo', true)
