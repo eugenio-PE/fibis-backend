@@ -6,7 +6,7 @@ import {
   registraIntervento,
   getStorico
 } from '../controllers/interventoController.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireOTP } from '../middleware/otp.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import multer from 'multer';
