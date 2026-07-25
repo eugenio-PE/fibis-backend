@@ -118,6 +118,95 @@ router.delete('/admin/manutentori/:id', authenticate, requireRole(['admin']), as
     res.status(500).json({ error: error.message });
   }
 });
+
+// ============================================
+// ROTTE PER PRODOTTI (CRUD)
+// ============================================
+
+// GET: Lista tutti i prodotti
+router.get('/admin/prodotti', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('prodotti_omologati')
+      .select('*')
+      .order('marca', { ascending: true });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST: Crea un nuovo prodotto
+router.post('/admin/prodotti', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id_produttore, categoria, marca, modello, codice_omologazione } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('prodotti_omologati')
+      .insert({
+        id_produttore,
+        categoria,
+        marca,
+        modello,
+        codice_omologazione,
+        attivo: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT: Aggiorna un prodotto
+router.put('/admin/prodotti/:id', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id_produttore, categoria, marca, modello, codice_omologazione, attivo } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('prodotti_omologati')
+      .update({
+        id_produttore,
+        categoria,
+        marca,
+        modello,
+        codice_omologazione,
+        attivo,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE: Elimina un prodotto
+router.delete('/admin/prodotti/:id', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabaseAdmin
+      .from('prodotti_omologati')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    res.json({ message: 'Prodotto eliminato con successo' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================
 // ROTTE PER DIRETTORI DI GARA (CRUD)
 // ============================================
@@ -141,7 +230,7 @@ router.get('/admin/direttori', authenticate, requireRole(['admin', 'settore_tecn
 // POST: Crea un nuovo direttore di gara
 router.post('/admin/direttori', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
-    const { nome, cognome, email, telefono } = req.body;
+    const { nome, cognome, email, telefono, data_scadenza_albo } = req.body;
 
     const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
       email,
@@ -160,6 +249,7 @@ router.post('/admin/direttori', authenticate, requireRole(['admin', 'settore_tec
         telefono: telefono || '',
         ruolo: 'direttore',
         is_active: true,
+        data_scadenza_albo: data_scadenza_albo || '2099-12-31',
       })
       .select()
       .single();
@@ -368,6 +458,7 @@ router.get('/asd/:id/qr', authenticate, requireRole(['admin']), async (req, res)
 // ============================================
 
 router.get('/asd/:qrCode', scanQR);
+
 // ============================================
 // ROTTE PER BILIARDI
 // ============================================
@@ -412,6 +503,7 @@ router.delete('/admin/biliardi/:id', authenticate, requireRole(['admin']), async
     res.status(500).json({ error: error.message });
   }
 });
+
 // ============================================
 // STATISTICHE PER LA DASHBOARD
 // ============================================
@@ -467,4 +559,5 @@ router.get('/stats/manutentori', authenticate, requireRole(['admin']), async (re
     res.status(500).json({ error: error.message });
   }
 });
+
 export default router;
