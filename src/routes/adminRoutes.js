@@ -118,6 +118,116 @@ router.delete('/admin/manutentori/:id', authenticate, requireRole(['admin']), as
     res.status(500).json({ error: error.message });
   }
 });
+// ============================================
+// ROTTE PER DIRETTORI DI GARA (CRUD)
+// ============================================
+
+// GET: Lista tutti i direttori di gara
+router.get('/admin/direttori', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('manutentori')
+      .select('*')
+      .eq('ruolo', 'direttore')
+      .order('cognome', { ascending: true });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST: Crea un nuovo direttore di gara
+router.post('/admin/direttori', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
+  try {
+    const { nome, cognome, email, telefono } = req.body;
+
+    const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+      email,
+      password: 'PasswordTemporanea123!',
+    });
+
+    if (authError) throw authError;
+
+    const { data, error } = await supabaseAdmin
+      .from('manutentori')
+      .insert({
+        user_id: authData.user.id,
+        nome,
+        cognome,
+        email,
+        telefono: telefono || '',
+        ruolo: 'direttore',
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT: Aggiorna un direttore di gara
+router.put('/admin/direttori/:id', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome, cognome, email, telefono, is_active } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('manutentori')
+      .update({
+        nome,
+        cognome,
+        email,
+        telefono,
+        is_active,
+      })
+      .eq('id', id)
+      .eq('ruolo', 'direttore')
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE: Elimina un direttore di gara
+router.delete('/admin/direttori/:id', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: direttore, error: findError } = await supabaseAdmin
+      .from('manutentori')
+      .select('user_id')
+      .eq('id', id)
+      .eq('ruolo', 'direttore')
+      .single();
+
+    if (findError) throw findError;
+
+    const { error: deleteError } = await supabaseAdmin
+      .from('manutentori')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) throw deleteError;
+
+    if (direttore.user_id) {
+      await supabaseAdmin.auth.admin.deleteUser(direttore.user_id);
+    }
+
+    res.json({ message: 'Direttore di gara eliminato con successo' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ============================================
 // ROTTE PER CONTROLLI A SORPRESA
