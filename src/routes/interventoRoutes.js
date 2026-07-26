@@ -289,5 +289,50 @@ router.post('/upload-foto', authenticate, upload.single('foto'), async (req, res
     res.status(500).json({ error: error.message });
   }
 });
+// POST: Registra una verifica (per Direttori)
+router.post('/verifiche', authenticate, async (req, res) => {
+  try {
+    const { id_biliardo, id_gara, conforme, motivo, note } = req.body;
 
+    // Verifica che il direttore sia autorizzato per questa gara
+    const { data: gara, error: garaError } = await supabaseAdmin
+      .from('gare')
+      .select('id_direttore')
+      .eq('id', id_gara)
+      .single();
+
+    if (garaError) throw garaError;
+
+    // Recupera l'id del direttore dal token
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .single();
+
+    if (gara.id_direttore !== manutentore.id) {
+      return res.status(403).json({ error: 'Non sei autorizzato per questa gara' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('verifiche')
+      .insert({
+        id_biliardo,
+        id_direttore: manutentore.id,
+        id_gara,
+        conforme,
+        motivo: conforme ? null : motivo,  // Solo se non conforme
+        note,
+        data_verifica: new Date(),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (error) {
+    console.error('❌ Errore POST /verifiche:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 export default router;

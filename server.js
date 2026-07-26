@@ -5,6 +5,7 @@ import authRoutes from './src/routes/authRoutes.js';
 import interventoRoutes from './src/routes/interventoRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import { supabase } from './src/config/supabase.js';
+import gareRoutes from './src/routes/gareRoutes.js';
 
 dotenv.config();
 
@@ -33,7 +34,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api', interventoRoutes);
 app.use('/api', adminRoutes);
-
+app.use('/api', gareRoutes);
 // Health check (sempre accessibile)
 app.get('/api/health', (req, res) => {
   res.json({ 
