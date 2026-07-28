@@ -16,7 +16,7 @@ router.get('/gare', authenticate, async (req, res) => {
       .from('manutentori')
       .select('ruolo, asd_id')
       .eq('user_id', req.userId)
-      .single();
+      .maybeSingle();  // ← MODIFICATO
 
     // Costruisci la query base
     let query = supabaseAdmin
@@ -54,7 +54,7 @@ router.get('/gare/:id', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `)
       .eq('id', id)
-      .single();
+      .maybeSingle();  // ← MODIFICATO
 
     if (error) throw error;
     res.json(data);
@@ -74,7 +74,7 @@ router.post('/gare', authenticate, async (req, res) => {
       .from('manutentori')
       .select('ruolo, asd_id')
       .eq('user_id', req.userId)
-      .single();
+      .maybeSingle();  // ← MODIFICATO
 
     const isAdmin = manutentore?.ruolo === 'admin';
     const isSettoreTecnico = manutentore?.ruolo === 'settore_tecnico';
@@ -122,7 +122,7 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
       .from('manutentori')
       .select('ruolo, asd_id')
       .eq('user_id', req.userId)
-      .single();
+      .maybeSingle();  // ← MODIFICATO
 
     let query = supabaseAdmin
       .from('gare')
