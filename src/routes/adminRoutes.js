@@ -28,7 +28,7 @@ router.get('/admin/manutentori', authenticate, requireRole(['admin']), async (re
 // POST: Crea un nuovo manutentore
 router.post('/admin/manutentori', authenticate, requireRole(['admin']), async (req, res) => {
   try {
-    const { nome, cognome, email, telefono, azienda, data_scadenza_albo, ruolo } = req.body;
+    const { nome, cognome, email, telefono, azienda, data_scadenza_albo, ruolo, asd_id } = req.body;
 
     const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
       email,
@@ -37,25 +37,34 @@ router.post('/admin/manutentori', authenticate, requireRole(['admin']), async (r
 
     if (authError) throw authError;
 
+    // Prepara i dati da inserire
+    const insertData = {
+      user_id: authData.user.id,
+      nome,
+      cognome,
+      email,
+      telefono: telefono || '',
+      azienda: azienda || '',
+      data_scadenza_albo,
+      ruolo: ruolo || 'manutentore',
+      is_active: true,
+    };
+
+    // Se il ruolo è presidente e asd_id è fornito, aggiungilo
+    if (ruolo === 'presidente' && asd_id) {
+      insertData.asd_id = asd_id;
+    }
+
     const { data, error } = await supabaseAdmin
       .from('manutentori')
-      .insert({
-        user_id: authData.user.id,
-        nome,
-        cognome,
-        email,
-        telefono: telefono || '',
-        azienda: azienda || '',
-        data_scadenza_albo,
-        ruolo: ruolo || 'manutentore',
-        is_active: true,
-      })
+      .insert(insertData)
       .select()
       .single();
 
     if (error) throw error;
     res.status(201).json(data);
   } catch (error) {
+    console.error('❌ Errore creazione manutentore:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -64,20 +73,29 @@ router.post('/admin/manutentori', authenticate, requireRole(['admin']), async (r
 router.put('/admin/manutentori/:id', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { nome, cognome, email, telefono, azienda, data_scadenza_albo, ruolo, is_active } = req.body;
+    const { nome, cognome, email, telefono, azienda, data_scadenza_albo, ruolo, is_active, asd_id } = req.body;
+
+    const updateData = {
+      nome,
+      cognome,
+      email,
+      telefono,
+      azienda,
+      data_scadenza_albo,
+      ruolo,
+      is_active,
+    };
+
+    // Se il ruolo è presidente, aggiorna asd_id
+    if (ruolo === 'presidente') {
+      updateData.asd_id = asd_id || null;
+    } else {
+      updateData.asd_id = null;
+    }
 
     const { data, error } = await supabaseAdmin
       .from('manutentori')
-      .update({
-        nome,
-        cognome,
-        email,
-        telefono,
-        azienda,
-        data_scadenza_albo,
-        ruolo,
-        is_active,
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
@@ -85,6 +103,7 @@ router.put('/admin/manutentori/:id', authenticate, requireRole(['admin']), async
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    console.error('❌ Errore aggiornamento manutentore:', error);
     res.status(500).json({ error: error.message });
   }
 });
