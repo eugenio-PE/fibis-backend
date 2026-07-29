@@ -35,10 +35,11 @@ router.get('/gare', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `);
 
-    // Se non è admin o settore tecnico, filtra per ASD
-    if (!['admin', 'settore_tecnico'].includes(manutentore?.ruolo)) {
-      query = query.eq('id_asd', manutentore?.asd_id);
-    }
+// Se non è admin o settore tecnico, filtra per ASD (solo se manutentore esiste)
+if (manutentore && !['admin', 'settore_tecnico'].includes(manutentore.ruolo)) {
+  query = query.eq('id_asd', manutentore.asd_id);
+}
+// Se manutentore è null, non applicare il filtro (mostra tutte le gare)
 
     const { data, error } = await query.order('data_gara', { ascending: false });
 
