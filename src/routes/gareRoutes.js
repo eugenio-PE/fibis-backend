@@ -7,6 +7,7 @@ const router = express.Router();
 // ============================================
 // ROTTE PER GARE
 // ============================================
+
 // GET: Lista tutte le gare
 router.get('/gare', authenticate, async (req, res) => {
   try {
@@ -35,11 +36,10 @@ router.get('/gare', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `);
 
-// Se non è admin o settore tecnico, filtra per ASD (solo se manutentore esiste)
-if (manutentore && !['admin', 'settore_tecnico'].includes(manutentore.ruolo)) {
-  query = query.eq('id_asd', manutentore.asd_id);
-}
-// Se manutentore è null, non applicare il filtro (mostra tutte le gare)
+    // Se non è admin o settore tecnico, filtra per ASD (solo se manutentore esiste)
+    if (manutentore && !['admin', 'settore_tecnico'].includes(manutentore.ruolo)) {
+      query = query.eq('id_asd', manutentore.asd_id);
+    }
 
     const { data, error } = await query.order('data_gara', { ascending: false });
 
@@ -56,6 +56,48 @@ if (manutentore && !['admin', 'settore_tecnico'].includes(manutentore.ruolo)) {
   }
 });
 
+// GET: Lista gare per ASD (SPOSTATA SOPRA /gare/:id PER EVITARE CONFLITTI DI ROUTING)
+router.get('/gare/asd/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('gare')
+      .select(`
+        *,
+        manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
+      `)
+      .eq('id_asd', id)
+      .order('data_gara', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /gare/asd/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET: Lista gare per Direttore (SPOSTATA SOPRA /gare/:id)
+router.get('/gare/direttore/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('gare')
+      .select(`
+        *,
+        asd_centri (id, nome)
+      `)
+      .eq('id_direttore', id)
+      .order('data_gara', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /gare/direttore/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET: Dettaglio di una gara
 router.get('/gare/:id', authenticate, async (req, res) => {
   try {
@@ -68,7 +110,7 @@ router.get('/gare/:id', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `)
       .eq('id', id)
-      .maybeSingle();  // ← MODIFICATO
+      .maybeSingle();
 
     if (error) throw error;
     res.json(data);
@@ -78,35 +120,93 @@ router.get('/gare/:id', authenticate, async (req, res) => {
   }
 });
 
+// GET: Lista verifiche per gara
+router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('verifiche')
+      .select(`
+        *,
+        biliardi (id, nome_tavolo),
+        manutentori!verifiche_id_direttore_fkey (id, nome, cognome, email)
+      `)
+      .eq('id_gara', id)
+      .order('data_verifica', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /gare/:id/verifiche:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST: Crea una nuova gara
 router.post('/gare', authenticate, async (req, res) => {
   try {
     const { id_asd, id_direttore, nulla_osta, tipologia, data_gara, note } = req.body;
 
-    // Verifica che l'utente sia autorizzato
-    const { data: manutentore } = await supabaseAdmin
+    console.log('🔵 [POST /gare] - Inizio creazione gara per user_id:', req.userId);
+    console.log('📥 [POST /gare] - Payload ricevuto:', { id_asd, id_direttore, tipologia, data_gara });
+
+    // 1. Recupera il manutentore associato all'utente autenticato
+    const { data: manutentore, error: manutentoreError } = await supabaseAdmin
       .from('manutentori')
-      .select('ruolo, asd_id')
+      .select('id, ruolo, asd_id')
       .eq('user_id', req.userId)
-      .maybeSingle();  // ← MODIFICATO
+      .maybeSingle();
 
-    const isAdmin = manutentore?.ruolo === 'admin';
-    const isSettoreTecnico = manutentore?.ruolo === 'settore_tecnico';
-    const isPresidente = manutentore?.ruolo === 'presidente';
-    const isSameAsd = manutentore?.asd_id === id_asd;
-
-    // Autorizzazione
-    const canInsert = isAdmin || isSettoreTecnico || (isPresidente && isSameAsd && tipologia === 'libera');
-
-    if (!canInsert) {
-      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    if (manutentoreError) {
+      console.error('❌ [POST /gare] - Errore query manutentori:', manutentoreError.message);
+      return res.status(500).json({ error: 'Errore durante la verifica dei permessi' });
     }
 
-    const { data, error } = await supabaseAdmin
+    if (!manutentore) {
+      console.warn('⚠️ [POST /gare] - Nessun manutentore trovato per user_id:', req.userId);
+      return res.status(403).json({ error: 'Utente non registrato come manutentore' });
+    }
+
+    console.log('👤 [POST /gare] - Manutentore trovato:', manutentore);
+
+    // 2. Controlli di Ruolo e Normalizzazione Tipi
+    const isAdmin = manutentore.ruolo === 'admin';
+    const isSettoreTecnico = manutentore.ruolo === 'settore_tecnico';
+    const isPresidente = manutentore.ruolo === 'presidente';
+
+    const manutentoreAsdIdStr = manutentore.asd_id !== null && manutentore.asd_id !== undefined ? String(manutentore.asd_id) : null;
+    const requestAsdIdStr = id_asd !== null && id_asd !== undefined ? String(id_asd) : null;
+
+    const isSameAsd = manutentoreAsdIdStr !== null && manutentoreAsdIdStr === requestAsdIdStr;
+
+    // 3. Verifica dell'autorizzazione
+    const canInsert = isAdmin || isSettoreTecnico || (isPresidente && isSameAsd && tipologia === 'libera');
+
+    console.log('🔍 [POST /gare] - Esito controlli autorizzazione:', {
+      isAdmin,
+      isSettoreTecnico,
+      isPresidente,
+      isSameAsd,
+      tipologia,
+      canInsert
+    });
+
+    if (!canInsert) {
+      console.warn('❌ [POST /gare] - Autorizzazione negata (403)');
+      return res.status(403).json({ 
+        error: 'Accesso non autorizzato per la creazione di questa gara' 
+      });
+    }
+
+    // Sanificazione dati di input
+    const parsedDirettoreId = id_direttore ? Number(id_direttore) : null;
+
+    // 4. Inserimento della gara su Supabase
+    const { data: nuovaGara, error: insertError } = await supabaseAdmin
       .from('gare')
       .insert({
         id_asd,
-        id_direttore,
+        id_direttore: parsedDirettoreId,
         nulla_osta,
         tipologia,
         data_gara,
@@ -117,11 +217,17 @@ router.post('/gare', authenticate, async (req, res) => {
       .select()
       .single();
 
-    if (error) throw error;
-    res.status(201).json(data);
+    if (insertError) {
+      console.error('❌ [POST /gare] - Errore durante l\'inserimento su DB:', insertError);
+      return res.status(500).json({ error: insertError.message });
+    }
+
+    console.log('✅ [POST /gare] - Gara creata con successo. ID:', nuovaGara.id);
+    return res.status(201).json(nuovaGara);
+
   } catch (error) {
-    console.error('❌ Errore POST /gare:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ [POST /gare] - Eccezione server:', error);
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -131,17 +237,16 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
     const { id } = req.params;
     const { id_direttore, nulla_osta, data_gara, stato, note } = req.body;
 
-    // Verifica che il presidente possa modificare solo le sue ASD
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
       .select('ruolo, asd_id')
       .eq('user_id', req.userId)
-      .maybeSingle();  // ← MODIFICATO
+      .maybeSingle();
 
     let query = supabaseAdmin
       .from('gare')
       .update({
-        id_direttore,
+        id_direttore: id_direttore ? Number(id_direttore) : null,
         nulla_osta,
         data_gara,
         stato,
@@ -150,7 +255,6 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
       })
       .eq('id', id);
 
-    // Se è presidente, filtra per ASD
     if (manutentore?.ruolo === 'presidente') {
       query = query.eq('id_asd', manutentore.asd_id);
     }
@@ -179,70 +283,6 @@ router.delete('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico'
     res.json({ message: 'Gara eliminata con successo' });
   } catch (error) {
     console.error('❌ Errore DELETE /gare/:id:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET: Lista gare per ASD
-router.get('/gare/asd/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data, error } = await supabaseAdmin
-      .from('gare')
-      .select(`
-        *,
-        manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
-      `)
-      .eq('id_asd', id)
-      .order('data_gara', { ascending: false });
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error('❌ Errore GET /gare/asd/:id:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET: Lista gare per Direttore
-router.get('/gare/direttore/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data, error } = await supabaseAdmin
-      .from('gare')
-      .select(`
-        *,
-        asd_centri (id, nome)
-      `)
-      .eq('id_direttore', id)
-      .order('data_gara', { ascending: false });
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error('❌ Errore GET /gare/direttore/:id:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET: Lista verifiche per gara
-router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data, error } = await supabaseAdmin
-      .from('verifiche')
-      .select(`
-        *,
-        biliardi (id, nome_tavolo),
-        manutentori!verifiche_id_direttore_fkey (id, nome, cognome, email)
-      `)
-      .eq('id_gara', id)
-      .order('data_verifica', { ascending: false });
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error('❌ Errore GET /gare/:id/verifiche:', error);
     res.status(500).json({ error: error.message });
   }
 });
