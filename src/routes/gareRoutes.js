@@ -21,7 +21,7 @@ router.get('/gare', authenticate, async (req, res) => {
     // Verifica il ruolo dell'utente
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
-      .select('ruolo, asd_id')
+      .select('ruolo')
       .eq('user_id', req.userId)
       .maybeSingle();
 
@@ -36,10 +36,9 @@ router.get('/gare', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `);
 
-    // Se non è admin o settore tecnico, filtra per ASD (solo se manutentore esiste)
-    if (manutentore && !['admin', 'settore_tecnico'].includes(manutentore.ruolo)) {
-      query = query.eq('id_asd', manutentore.asd_id);
-    }
+    // Se non è admin o settore tecnico, filtra per ASD
+    // Nota: il filtro per ASD è stato rimosso perché la colonna asd_id non esiste in manutentori
+    // In futuro, se aggiungerai la colonna, potrai ripristinarlo
 
     const { data, error } = await query.order('data_gara', { ascending: false });
 
@@ -153,7 +152,7 @@ router.post('/gare', authenticate, async (req, res) => {
     // 1. Recupera il manutentore associato all'utente autenticato
     const { data: manutentore, error: manutentoreError } = await supabaseAdmin
       .from('manutentori')
-      .select('id, ruolo, asd_id')
+      .select('id, ruolo')  // ← RIMOSSO asd_id
       .eq('user_id', req.userId)
       .maybeSingle();
 
@@ -169,24 +168,19 @@ router.post('/gare', authenticate, async (req, res) => {
 
     console.log('👤 [POST /gare] - Manutentore trovato:', manutentore);
 
-    // 2. Controlli di Ruolo e Normalizzazione Tipi
+    // 2. Controlli di Ruolo
     const isAdmin = manutentore.ruolo === 'admin';
     const isSettoreTecnico = manutentore.ruolo === 'settore_tecnico';
     const isPresidente = manutentore.ruolo === 'presidente';
 
-    const manutentoreAsdIdStr = manutentore.asd_id !== null && manutentore.asd_id !== undefined ? String(manutentore.asd_id) : null;
-    const requestAsdIdStr = id_asd !== null && id_asd !== undefined ? String(id_asd) : null;
-
-    const isSameAsd = manutentoreAsdIdStr !== null && manutentoreAsdIdStr === requestAsdIdStr;
-
     // 3. Verifica dell'autorizzazione
-    const canInsert = isAdmin || isSettoreTecnico || (isPresidente && isSameAsd && tipologia === 'libera');
+    // Il presidente può creare solo gare di tipologia 'libera'
+    const canInsert = isAdmin || isSettoreTecnico || (isPresidente && tipologia === 'libera');
 
     console.log('🔍 [POST /gare] - Esito controlli autorizzazione:', {
       isAdmin,
       isSettoreTecnico,
       isPresidente,
-      isSameAsd,
       tipologia,
       canInsert
     });
@@ -239,7 +233,7 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
 
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
-      .select('ruolo, asd_id')
+      .select('ruolo')  // ← RIMOSSO asd_id
       .eq('user_id', req.userId)
       .maybeSingle();
 
@@ -255,9 +249,8 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
       })
       .eq('id', id);
 
-    if (manutentore?.ruolo === 'presidente') {
-      query = query.eq('id_asd', manutentore.asd_id);
-    }
+    // Il filtro per presidente è stato rimosso perché asd_id non esiste
+    // In futuro, se aggiungerai la colonna, potrai ripristinarlo
 
     const { data, error } = await query.select().single();
 
