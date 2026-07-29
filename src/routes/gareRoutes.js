@@ -195,21 +195,21 @@ router.post('/gare', authenticate, async (req, res) => {
     // Sanificazione dati di input
     const parsedDirettoreId = id_direttore ? Number(id_direttore) : null;
 
-    // 4. Inserimento della gara su Supabase
-    const { data: nuovaGara, error: insertError } = await supabaseAdmin
-      .from('gare')
-      .insert({
-        id_asd,
-        id_direttore: parsedDirettoreId,
-        nulla_osta,
-        tipologia,
-        data_gara,
-        stato: 'inserita',
-        inserito_da: req.userId,
-        note,
-      })
-      .select()
-      .single();
+// 4. Inserimento della gara su Supabase
+const { data: nuovaGara, error: insertError } = await supabaseAdmin
+  .from('gare')
+  .insert({
+    id_asd,
+    id_direttore: parsedDirettoreId,
+    nulla_osta,
+    tipologia,
+    data_gara,
+    stato: 'inserita',
+    inserito_da: manutentore.id,  // ← MODIFICA QUI (era req.userId)
+    note,
+  })
+  .select()
+  .single();
 
     if (insertError) {
       console.error('❌ [POST /gare] - Errore durante l\'inserimento su DB:', insertError);
