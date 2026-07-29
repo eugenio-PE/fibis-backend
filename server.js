@@ -16,6 +16,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: [
     'https://fibis-admin.vercel.app',
+        'https://fibis-admin-7f3a3zjdm-fibis.vercel.app',  // ← AGGIUNGI QUESTO
     'https://fibismanutentori.vercel.app',     // ← underscores!
     'https://fibisdirettori.vercel.app',      // ← underscores!
     'https://fibispresidenti.vercel.app',     // ← underscores!
