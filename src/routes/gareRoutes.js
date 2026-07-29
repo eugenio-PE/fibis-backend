@@ -7,16 +7,24 @@ const router = express.Router();
 // ============================================
 // ROTTE PER GARE
 // ============================================
-
 // GET: Lista tutte le gare
 router.get('/gare', authenticate, async (req, res) => {
   try {
+    console.log('🔵 GET /gare - req.userId:', req.userId);
+
+    if (!req.userId) {
+      console.error('❌ req.userId è undefined!');
+      return res.status(401).json({ error: 'Utente non autenticato' });
+    }
+
     // Verifica il ruolo dell'utente
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
       .select('ruolo, asd_id')
       .eq('user_id', req.userId)
-      .maybeSingle();  // ← MODIFICATO
+      .maybeSingle();
+
+    console.log('🔵 manutentore trovato:', manutentore);
 
     // Costruisci la query base
     let query = supabaseAdmin
@@ -34,7 +42,12 @@ router.get('/gare', authenticate, async (req, res) => {
 
     const { data, error } = await query.order('data_gara', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Errore query gare:', error);
+      throw error;
+    }
+    
+    console.log('✅ Gare trovate:', data?.length || 0);
     res.json(data);
   } catch (error) {
     console.error('❌ Errore GET /gare:', error);
