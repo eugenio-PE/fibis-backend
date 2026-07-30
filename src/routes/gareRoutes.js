@@ -283,6 +283,70 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
     res.status(500).json({ error: error.message });
   }
 });
+// PUT: Assegna un direttore a una gara (per Presidenti ASD)
+router.put('/gare/:id/direttore', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id_direttore } = req.body;
+
+    if (!id_direttore) {
+      return res.status(400).json({ error: 'id_direttore è obbligatorio' });
+    }
+
+    // Verifica il ruolo e l'ASD del presidente
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('ruolo, asd_id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (!manutentore) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    const isAdmin = manutentore.ruolo === 'admin';
+    const isSettoreTecnico = manutentore.ruolo === 'settore_tecnico';
+    const isPresidente = manutentore.ruolo === 'presidente';
+
+    // Solo admin, settore tecnico o presidente possono assegnare
+    if (!isAdmin && !isSettoreTecnico && !isPresidente) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    // Verifica che la gara esista e appartenga alla ASD del presidente
+    const { data: gara, error: garaError } = await supabaseAdmin
+      .from('gare')
+      .select('id_asd')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (garaError || !gara) {
+      return res.status(404).json({ error: 'Gara non trovata' });
+    }
+
+    // Se è presidente, verifica che la gara sia della sua ASD
+    if (isPresidente && gara.id_asd !== manutentore.asd_id) {
+      return res.status(403).json({ error: 'Non sei autorizzato per questa ASD' });
+    }
+
+    // Assegna il direttore alla gara
+    const { data, error } = await supabaseAdmin
+      .from('gare')
+      .update({
+        id_direttore,
+        updated_at: new Date()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore PUT /gare/:id/direttore:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // DELETE: Elimina una gara
 router.delete('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
