@@ -140,6 +140,28 @@ router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// GET: Lista verifiche per ASD (usata dal Presidente)
+router.get('/asd/:id/verifiche', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('verifiche')
+      .select(`
+        *,
+        biliardi (id, nome_tavolo),
+        manutentori!verifiche_id_direttore_fkey (id, nome, cognome, email),
+        gare (id, nulla_osta, data_gara)
+      `)
+      .eq('biliardi.id_asd', id)
+      .order('data_verifica', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /asd/:id/verifiche:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // POST: Crea una nuova gara
 router.post('/gare', authenticate, async (req, res) => {
