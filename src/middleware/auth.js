@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase, supabaseAdmin } from '../config/supabase.js';
 
 export async function authenticate(req, res, next) {
   try {
@@ -45,11 +45,11 @@ export function requireRole(roles = []) {
       console.log('🔵 [11] requireRole - INIZIO, ruoli richiesti:', roles);
       console.log('🔵 [12] req.userId:', req.userId);
 
-      const { data: manutentore, error } = await supabase
-        .from('manutentori')
-        .select('ruolo')
-        .eq('user_id', req.userId)
-        .single();
+      const { data: manutentore, error } = await supabaseAdmin
+  .from('manutentori')
+  .select('ruolo')
+  .eq('user_id', req.userId)
+  .maybeSingle();  // ← CAMBIA QUI!
 
       if (error) {
         console.error('❌ [13] Errore query manutentori:', error.message);
