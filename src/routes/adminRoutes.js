@@ -37,7 +37,6 @@ router.post('/admin/manutentori', authenticate, requireRole(['admin']), async (r
 
     if (authError) throw authError;
 
-    // Prepara i dati da inserire
     const insertData = {
       user_id: authData.user.id,
       nome,
@@ -50,7 +49,6 @@ router.post('/admin/manutentori', authenticate, requireRole(['admin']), async (r
       is_active: true,
     };
 
-    // Se il ruolo è presidente e asd_id è fornito, aggiungilo
     if (ruolo === 'presidente' && asd_id) {
       insertData.asd_id = asd_id;
     }
@@ -86,7 +84,6 @@ router.put('/admin/manutentori/:id', authenticate, requireRole(['admin']), async
       is_active,
     };
 
-    // Se il ruolo è presidente, aggiorna asd_id
     if (ruolo === 'presidente') {
       updateData.asd_id = asd_id || null;
     } else {
@@ -338,6 +335,34 @@ router.delete('/admin/direttori/:id', authenticate, requireRole(['admin', 'setto
   }
 });
 
+// GET: Lista direttori disponibili (per Presidenti ASD)
+router.get('/direttori/disponibili', authenticate, async (req, res) => {
+  try {
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('ruolo')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (!manutentore || manutentore.ruolo !== 'presidente') {
+      return res.status(403).json({ error: 'Accesso riservato ai presidenti ASD' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('manutentori')
+      .select('id, nome, cognome, email')
+      .eq('ruolo', 'direttore')
+      .eq('is_active', true)
+      .order('cognome', { ascending: true });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /direttori/disponibili:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================
 // ROTTE PER CONTROLLI A SORPRESA
 // ============================================
@@ -373,19 +398,37 @@ router.get('/admin/asd', authenticate, requireRole(['admin']), async (req, res) 
   }
 });
 
-// POST: Crea una nuova ASD
+// POST: Crea una nuova ASD (AGGIORNATO con nuovi campi)
 router.post('/admin/asd', authenticate, requireRole(['admin']), async (req, res) => {
   try {
-    const { nome, indirizzo, referente_nome, referente_email, referente_telefono } = req.body;
+    const { 
+      nome, indirizzo, 
+      responsabile_nome, responsabile_email, responsabile_telefono,
+      codice, stagione, cap, comune, provincia, regione, 
+      email_contatto, telefono_contatto, pec,
+      responsabile_cognome, cf_responsabile, cf_asd
+    } = req.body;
 
     const { data, error } = await supabaseAdmin
       .from('asd_centri')
       .insert({
         nome,
         indirizzo,
-        referente_nome,
-        referente_email,
-        referente_telefono,
+        responsabile_nome,
+        responsabile_email,
+        responsabile_telefono,
+        codice,
+        stagione,
+        cap,
+        comune,
+        provincia,
+        regione,
+        email_contatto,
+        telefono_contatto,
+        pec,
+        responsabile_cognome,
+        cf_responsabile,
+        cf_asd,
         attivo: true,
       })
       .select()
@@ -394,24 +437,43 @@ router.post('/admin/asd', authenticate, requireRole(['admin']), async (req, res)
     if (error) throw error;
     res.status(201).json(data);
   } catch (error) {
+    console.error('❌ Errore creazione ASD:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// PUT: Aggiorna una ASD
+// PUT: Aggiorna una ASD (AGGIORNATO con nuovi campi)
 router.put('/admin/asd/:id', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { nome, indirizzo, referente_nome, referente_email, referente_telefono } = req.body;
+    const { 
+      nome, indirizzo, 
+      responsabile_nome, responsabile_email, responsabile_telefono,
+      codice, stagione, cap, comune, provincia, regione, 
+      email_contatto, telefono_contatto, pec,
+      responsabile_cognome, cf_responsabile, cf_asd
+    } = req.body;
 
     const { data, error } = await supabaseAdmin
       .from('asd_centri')
       .update({
         nome,
         indirizzo,
-        referente_nome,
-        referente_email,
-        referente_telefono,
+        responsabile_nome,
+        responsabile_email,
+        responsabile_telefono,
+        codice,
+        stagione,
+        cap,
+        comune,
+        provincia,
+        regione,
+        email_contatto,
+        telefono_contatto,
+        pec,
+        responsabile_cognome,
+        cf_responsabile,
+        cf_asd,
       })
       .eq('id', id)
       .select()
@@ -420,6 +482,7 @@ router.put('/admin/asd/:id', authenticate, requireRole(['admin']), async (req, r
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    console.error('❌ Errore aggiornamento ASD:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -575,6 +638,100 @@ router.get('/stats/manutentori', authenticate, requireRole(['admin']), async (re
     if (error) throw error;
     res.json(count || 0);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROTTA PER IMPORTAZIONE CSV ASD
+// ============================================
+
+router.post('/admin/asd/import', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { asd } = req.body;
+
+    if (!asd || asd.length === 0) {
+      return res.status(400).json({ error: 'Nessun dato da importare' });
+    }
+
+    let importati = 0;
+    let aggiornati = 0;
+    let errori = 0;
+
+    for (const record of asd) {
+      try {
+        // Mappatura campi CSV -> DB
+        const data = {
+          codice: record['Codice']?.trim() || null,
+          stagione: record['Stagione']?.trim() || null,
+          nome: record['Denominazione']?.trim() || null,
+          indirizzo: record['Indirizzo sede legale']?.trim() || null,
+          cap: record['CAP']?.toString() || null,
+          comune: record['Comune sede legale']?.trim() || null,
+          provincia: record['Prov.']?.trim() || null,
+          regione: record['Regione']?.trim() || null,
+          email_contatto: record['e-mail']?.trim() || null,
+          telefono_contatto: record['telefono']?.toString() || null,
+          pec: record['PEC']?.trim() || null,
+          responsabile_cognome: record['Cognome Resp.Legale']?.trim() || null,
+          responsabile_nome: record['Nome Resp.Legale']?.trim() || null,
+          cf_responsabile: record['Codice Fiscale']?.trim() || null,
+          cf_asd: record['Codice fiscale']?.trim() || null,
+          attivo: true
+        };
+
+        // Verifica se esiste già una ASD con questo codice
+        if (data.codice) {
+          const { data: existing, error: findError } = await supabaseAdmin
+            .from('asd_centri')
+            .select('id')
+            .eq('codice', data.codice)
+            .maybeSingle();
+
+          if (findError) throw findError;
+
+          if (existing) {
+            // UPSERT: aggiorna record esistente
+            const { error: updateError } = await supabaseAdmin
+              .from('asd_centri')
+              .update(data)
+              .eq('id', existing.id);
+
+            if (updateError) throw updateError;
+            aggiornati++;
+          } else {
+            // INSERT: nuovo record
+            const { error: insertError } = await supabaseAdmin
+              .from('asd_centri')
+              .insert(data);
+
+            if (insertError) throw insertError;
+            importati++;
+          }
+        } else {
+          // Se non c'è codice, inserisce come nuovo
+          const { error: insertError } = await supabaseAdmin
+            .from('asd_centri')
+            .insert(data);
+
+          if (insertError) throw insertError;
+          importati++;
+        }
+      } catch (recordError) {
+        console.error('❌ Errore su record:', recordError);
+        errori++;
+      }
+    }
+
+    res.json({
+      importati,
+      aggiornati,
+      errori,
+      totale: asd.length
+    });
+
+  } catch (error) {
+    console.error('❌ Errore importazione ASD:', error);
     res.status(500).json({ error: error.message });
   }
 });
