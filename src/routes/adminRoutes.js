@@ -25,41 +25,79 @@ router.get('/admin/manutentori', authenticate, requireRole(['admin']), async (re
   }
 });
 
-// POST: Crea un nuovo manutentore
+// POST: Crea un nuovo manutentore/presidente/direttore
 router.post('/admin/manutentori', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { nome, cognome, email, telefono, azienda, data_scadenza_albo, ruolo, asd_id } = req.body;
 
-    const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-      email,
-      password: 'PasswordTemporanea123!',
-    });
+    // 1. Verifica se l'utente esiste già in auth.users
+    const { data: existingUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+    
+    if (listError) {
+      console.error('❌ Errore listUsers:', listError);
+      throw listError;
+    }
 
-    if (authError) throw authError;
+    const existingUser = existingUsers?.users?.find(u => u.email === email);
 
+    let userId;
+    if (existingUser) {
+      // Utente già esistente, usa il suo ID
+      userId = existingUser.id;
+      console.log(`📌 Utente già esistente: ${email} (${userId})`);
+    } else {
+      // 2. Crea un nuovo utente in Supabase Auth
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+        email,
+        password: 'PasswordTemporanea123!',
+      });
+
+      if (authError) {
+        console.error('❌ Errore signUp:', authError);
+        throw authError;
+      }
+      userId = authData.user.id;
+      console.log(`✅ Utente creato: ${email} (${userId})`);
+    }
+
+    // 3. Prepara i dati da inserire
     const insertData = {
-      user_id: authData.user.id,
+      user_id: userId,
       nome,
       cognome,
       email,
       telefono: telefono || '',
-      azienda: azienda || '',
-      data_scadenza_albo,
       ruolo: ruolo || 'manutentore',
       is_active: true,
     };
 
-    if (ruolo === 'presidente' && asd_id) {
-      insertData.asd_id = asd_id;
+    // Campi specifici per ruolo
+    if (ruolo === 'manutentore') {
+      insertData.azienda = azienda || '';
+      insertData.data_scadenza_albo = data_scadenza_albo;
+    } else if (ruolo === 'presidente') {
+      insertData.asd_id = asd_id || null;
+      insertData.data_scadenza_albo = '2026-08-31';  // Scadenza affiliazione
+    } else if (ruolo === 'direttore') {
+      insertData.data_scadenza_albo = '2026-08-31';  // Scadenza tessera
+    } else {
+      // Per altri ruoli, usa i campi standard
+      insertData.data_scadenza_albo = data_scadenza_albo || null;
     }
 
+    // 4. Inserisci in manutentori
     const { data, error } = await supabaseAdmin
       .from('manutentori')
       .insert(insertData)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Errore insert manutentori:', error);
+      throw error;
+    }
+
+    console.log(`✅ ${ruolo} creato: ${nome} ${cognome} (${email})`);
     res.status(201).json(data);
   } catch (error) {
     console.error('❌ Errore creazione manutentore:', error);
@@ -772,6 +810,7 @@ router.post('/admin/asd/import', authenticate, requireRole(['admin']), async (re
                   ruolo: 'presidente',
                   asd_id: asdId,
                   is_active: true,
+                  data_scadenza_albo: '2026-08-31',  // ← AGGIUNTO!
                 });
 
               if (insertPresidenteError) throw insertPresidenteError;
