@@ -144,6 +144,22 @@ router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
 router.get('/asd/:id/verifiche', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // 1. Prima ottieni i biliardi dell'ASD
+    const { data: biliardi, error: biliardiError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id')
+      .eq('id_asd', id);
+
+    if (biliardiError) throw biliardiError;
+
+    const biliardiIds = biliardi.map(b => b.id);
+
+    if (biliardiIds.length === 0) {
+      return res.json([]);
+    }
+
+    // 2. Poi ottieni le verifiche per quei biliardi
     const { data, error } = await supabaseAdmin
       .from('verifiche')
       .select(`
@@ -152,7 +168,7 @@ router.get('/asd/:id/verifiche', authenticate, async (req, res) => {
         manutentori!verifiche_id_direttore_fkey (id, nome, cognome, email),
         gare (id, nulla_osta, data_gara)
       `)
-      .eq('biliardi.id_asd', id)
+      .in('id_biliardo', biliardiIds)
       .order('data_verifica', { ascending: false });
 
     if (error) throw error;
