@@ -656,11 +656,12 @@ router.post('/admin/asd/import', authenticate, requireRole(['admin']), async (re
 
     let importati = 0;
     let aggiornati = 0;
+    let presidentiCreati = 0;
     let errori = 0;
 
     for (const record of asd) {
       try {
-        // Mappatura campi CSV -> DB
+        // ===== 1. MAPPA CAMPI CSV =====
         const data = {
           codice: record['Codice']?.trim() || null,
           stagione: record['Stagione']?.trim() || null,
@@ -680,7 +681,9 @@ router.post('/admin/asd/import', authenticate, requireRole(['admin']), async (re
           attivo: true
         };
 
-        // Verifica se esiste già una ASD con questo codice
+        // ===== 2. UPSERT ASD =====
+        let asdId;
+
         if (data.codice) {
           const { data: existing, error: findError } = await supabaseAdmin
             .from('asd_centri')
@@ -691,32 +694,95 @@ router.post('/admin/asd/import', authenticate, requireRole(['admin']), async (re
           if (findError) throw findError;
 
           if (existing) {
-            // UPSERT: aggiorna record esistente
             const { error: updateError } = await supabaseAdmin
               .from('asd_centri')
               .update(data)
               .eq('id', existing.id);
 
             if (updateError) throw updateError;
+            asdId = existing.id;
             aggiornati++;
           } else {
-            // INSERT: nuovo record
-            const { error: insertError } = await supabaseAdmin
+            const { data: newAsd, error: insertError } = await supabaseAdmin
               .from('asd_centri')
-              .insert(data);
+              .insert(data)
+              .select()
+              .single();
 
             if (insertError) throw insertError;
+            asdId = newAsd.id;
             importati++;
           }
         } else {
-          // Se non c'è codice, inserisce come nuovo
-          const { error: insertError } = await supabaseAdmin
+          const { data: newAsd, error: insertError } = await supabaseAdmin
             .from('asd_centri')
-            .insert(data);
+            .insert(data)
+            .select()
+            .single();
 
           if (insertError) throw insertError;
+          asdId = newAsd.id;
           importati++;
         }
+
+        // ===== 3. CREA PRESIDENTE AUTOMATICAMENTE =====
+        const emailPresidente = record['e-mail']?.trim();
+        const nomePresidente = record['Nome Resp.Legale']?.trim();
+        const cognomePresidente = record['Cognome Resp.Legale']?.trim();
+
+        if (emailPresidente && nomePresidente && cognomePresidente && asdId) {
+          try {
+            // Verifica se l'utente esiste già in auth.users
+            const { data: existingUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+            const existingUser = existingUsers?.users?.find(u => u.email === emailPresidente);
+
+            let userId;
+
+            if (existingUser) {
+              // Utente già esistente in Auth
+              userId = existingUser.id;
+            } else {
+              // Crea nuovo utente in Supabase Auth
+              const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+                email: emailPresidente,
+                password: 'PasswordTemporanea123!',
+              });
+
+              if (authError) throw authError;
+              userId = authData.user.id;
+            }
+
+            // Verifica se il presidente esiste già in manutentori
+            const { data: existingPresidente } = await supabaseAdmin
+              .from('manutentori')
+              .select('id')
+              .eq('email', emailPresidente)
+              .eq('ruolo', 'presidente')
+              .maybeSingle();
+
+            if (!existingPresidente) {
+              // Crea il record in manutentori
+              const { error: insertPresidenteError } = await supabaseAdmin
+                .from('manutentori')
+                .insert({
+                  user_id: userId,
+                  nome: nomePresidente,
+                  cognome: cognomePresidente,
+                  email: emailPresidente,
+                  ruolo: 'presidente',
+                  asd_id: asdId,
+                  is_active: true,
+                });
+
+              if (insertPresidenteError) throw insertPresidenteError;
+              presidentiCreati++;
+            }
+          } catch (presidenteError) {
+            console.error('❌ Errore creazione presidente per ASD', asdId, ':', presidenteError);
+            // Non bloccare l'importazione per errore del presidente
+          }
+        }
+
       } catch (recordError) {
         console.error('❌ Errore su record:', recordError);
         errori++;
@@ -726,6 +792,7 @@ router.post('/admin/asd/import', authenticate, requireRole(['admin']), async (re
     res.json({
       importati,
       aggiornati,
+      presidentiCreati,
       errori,
       totale: asd.length
     });
