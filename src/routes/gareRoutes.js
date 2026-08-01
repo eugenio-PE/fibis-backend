@@ -8,7 +8,7 @@ const router = express.Router();
 // ROTTE PER GARE
 // ============================================
 
-// GET: Lista tutte le gare
+// GET: Lista tutte le gare CON CONTEGGIO VERIFICHE (usata dalla Dashboard Admin)
 router.get('/gare', authenticate, async (req, res) => {
   try {
     console.log('🔵 GET /gare - req.userId:', req.userId);
@@ -27,7 +27,7 @@ router.get('/gare', authenticate, async (req, res) => {
 
     console.log('🔵 manutentore trovato:', manutentore);
 
-    // Costruisci la query base
+    // 1. Prima ottieni le gare
     let query = supabaseAdmin
       .from('gare')
       .select(`
@@ -36,15 +36,32 @@ router.get('/gare', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `);
 
-    const { data, error } = await query.order('data_gara', { ascending: false });
+    const { data: gareData, error: gareError } = await query.order('data_gara', { ascending: false });
 
-    if (error) {
-      console.error('❌ Errore query gare:', error);
-      throw error;
+    if (gareError) {
+      console.error('❌ Errore query gare:', gareError);
+      throw gareError;
     }
-    
-    console.log('✅ Gare trovate:', data?.length || 0);
-    res.json(data);
+
+    // 2. Per ogni gara, conta le verifiche
+    const gareConVerifiche = await Promise.all(
+      (gareData || []).map(async (gara) => {
+        const { count, error: countError } = await supabaseAdmin
+          .from('verifiche')
+          .select('*', { count: 'exact', head: true })
+          .eq('id_gara', gara.id);
+
+        if (countError) {
+          console.error(`❌ Errore conteggio verifiche per gara ${gara.id}:`, countError);
+          return { ...gara, verifiche_count: 0 };
+        }
+
+        return { ...gara, verifiche_count: count || 0 };
+      })
+    );
+
+    console.log('✅ Gare trovate:', gareConVerifiche?.length || 0);
+    res.json(gareConVerifiche);
   } catch (error) {
     console.error('❌ Errore GET /gare:', error);
     res.status(500).json({ error: error.message });
@@ -137,7 +154,7 @@ router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
   }
 });
 
-// GET: Lista verifiche DETTAGLIO per gara (usata dalla Dashboard Admin)
+// GET: Lista verifiche DETTAGLIO per gara (usata dalla Dashboard Admin per il modal)
 // Questa route è specifica per l'admin e permette di vedere tutte le verifiche con dettagli
 router.get('/gare/:id/verifiche-dettaglio', authenticate, requireRole(['admin']), async (req, res) => {
   try {
