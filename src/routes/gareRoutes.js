@@ -36,10 +36,6 @@ router.get('/gare', authenticate, async (req, res) => {
         manutentori!gare_id_direttore_fkey (id, nome, cognome, email)
       `);
 
-    // Se non è admin o settore tecnico, filtra per ASD
-    // Nota: il filtro per ASD è stato rimosso perché la colonna asd_id non esiste in manutentori
-    // In futuro, se aggiungerai la colonna, potrai ripristinarlo
-
     const { data, error } = await query.order('data_gara', { ascending: false });
 
     if (error) {
@@ -119,7 +115,7 @@ router.get('/gare/:id', authenticate, async (req, res) => {
   }
 });
 
-// GET: Lista verifiche per gara
+// GET: Lista verifiche per gara (usata dalle app Flutter)
 router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -140,6 +136,30 @@ router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// GET: Lista verifiche DETTAGLIO per gara (usata dalla Dashboard Admin)
+// Questa route è specifica per l'admin e permette di vedere tutte le verifiche con dettagli
+router.get('/gare/:id/verifiche-dettaglio', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('verifiche')
+      .select(`
+        *,
+        biliardi (id, nome_tavolo),
+        manutentori!verifiche_id_direttore_fkey (id, nome, cognome, email)
+      `)
+      .eq('id_gara', id)
+      .order('data_verifica', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /gare/:id/verifiche-dettaglio:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET: Lista verifiche per ASD (usata dal Presidente)
 router.get('/asd/:id/verifiche', authenticate, async (req, res) => {
   try {
@@ -190,7 +210,7 @@ router.post('/gare', authenticate, async (req, res) => {
     // 1. Recupera il manutentore associato all'utente autenticato
     const { data: manutentore, error: manutentoreError } = await supabaseAdmin
       .from('manutentori')
-      .select('id, ruolo')  // ← RIMOSSO asd_id
+      .select('id, ruolo')
       .eq('user_id', req.userId)
       .maybeSingle();
 
@@ -233,21 +253,21 @@ router.post('/gare', authenticate, async (req, res) => {
     // Sanificazione dati di input
     const parsedDirettoreId = id_direttore ? Number(id_direttore) : null;
 
-// 4. Inserimento della gara su Supabase
-const { data: nuovaGara, error: insertError } = await supabaseAdmin
-  .from('gare')
-  .insert({
-    id_asd,
-    id_direttore: parsedDirettoreId,
-    nulla_osta,
-    tipologia,
-    data_gara,
-    stato: 'inserita',
-    inserito_da: manutentore.id,  // ← MODIFICA QUI (era req.userId)
-    note,
-  })
-  .select()
-  .single();
+    // 4. Inserimento della gara su Supabase - MODIFICA: stato ora è 'programmata'
+    const { data: nuovaGara, error: insertError } = await supabaseAdmin
+      .from('gare')
+      .insert({
+        id_asd,
+        id_direttore: parsedDirettoreId,
+        nulla_osta,
+        tipologia,
+        data_gara,
+        stato: 'programmata',  // ✅ MODIFICA FATTA: da 'inserita' a 'programmata'
+        inserito_da: manutentore.id,
+        note,
+      })
+      .select()
+      .single();
 
     if (insertError) {
       console.error('❌ [POST /gare] - Errore durante l\'inserimento su DB:', insertError);
@@ -271,7 +291,7 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
 
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
-      .select('ruolo')  // ← RIMOSSO asd_id
+      .select('ruolo')
       .eq('user_id', req.userId)
       .maybeSingle();
 
@@ -287,9 +307,6 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
       })
       .eq('id', id);
 
-    // Il filtro per presidente è stato rimosso perché asd_id non esiste
-    // In futuro, se aggiungerai la colonna, potrai ripristinarlo
-
     const { data, error } = await query.select().single();
 
     if (error) throw error;
@@ -299,6 +316,7 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
     res.status(500).json({ error: error.message });
   }
 });
+
 // PUT: Assegna un direttore a una gara (per Presidenti ASD)
 router.put('/gare/:id/direttore', authenticate, async (req, res) => {
   try {
