@@ -573,6 +573,50 @@ router.get('/asd/:id/qr', authenticate, requireRole(['admin']), async (req, res)
   }
 });
 
+// ===== INSERISCI QUI LA NUOVA ROTTA =====
+// POST: Genera QR per ASD (crea nuovo QR code)
+router.post('/admin/asd/:id/genera-qr', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // 1. Recupera l'ASD
+    const { data: asd, error: findError } = await supabaseAdmin
+      .from('asd_centri')
+      .select('codice, nome')
+      .eq('id', id)
+      .single();
+    
+    if (findError) throw findError;
+    
+    // 2. Genera un UUID per il QR code
+    const { v4: uuidv4 } = await import('uuid');
+    const qrCode = uuidv4();
+    
+    // 3. Aggiorna l'ASD con il QR code
+    const { data, error } = await supabaseAdmin
+      .from('asd_centri')
+      .update({ qr_code: qrCode })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // 4. Costruisci l'URL del QR
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const qrUrl = `${baseUrl}/asd/${qrCode}`;
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`;
+    
+    res.json({
+      qr_url: qrImageUrl,
+      qr_code: qrCode,
+      asd_nome: asd.nome,
+    });
+  } catch (error) {
+    console.error('❌ Errore generazione QR:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 // ============================================
 // ROTTA PUBBLICA PER QR
 // ============================================
