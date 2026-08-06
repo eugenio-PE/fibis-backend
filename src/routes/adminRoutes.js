@@ -601,13 +601,11 @@ router.post('/admin/asd/:id/genera-qr', authenticate, requireRole(['admin']), as
     if (error) throw error;
     
     // 4. Costruisci l'URL del QR
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const qrUrl = `${baseUrl}/asd/${qrCode}`;
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`;
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCode)}`;
     
     res.json({
-      qr_url: qrImageUrl,
       qr_code: qrCode,
+      qr_code_url: qrImageUrl,   // ← CAMBIATO: qr_code_url invece di qr_url
       asd_nome: asd.nome,
     });
   } catch (error) {
