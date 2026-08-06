@@ -573,7 +573,6 @@ router.get('/asd/:id/qr', authenticate, requireRole(['admin']), async (req, res)
   }
 });
 
-// ===== INSERISCI QUI LA NUOVA ROTTA =====
 // POST: Genera QR per ASD (crea nuovo QR code)
 router.post('/admin/asd/:id/genera-qr', authenticate, requireRole(['admin']), async (req, res) => {
   try {
@@ -588,9 +587,8 @@ router.post('/admin/asd/:id/genera-qr', authenticate, requireRole(['admin']), as
     
     if (findError) throw findError;
     
-    // 2. Genera un UUID per il QR code
-    const { v4: uuidv4 } = await import('uuid');
-    const qrCode = uuidv4();
+    // 2. Genera un UUID per il QR code (USA crypto.randomUUID() NATIVO)
+    const qrCode = crypto.randomUUID();
     
     // 3. Aggiorna l'ASD con il QR code
     const { data, error } = await supabaseAdmin
