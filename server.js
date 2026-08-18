@@ -6,6 +6,8 @@ import interventoRoutes from './src/routes/interventoRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import { supabase } from './src/config/supabase.js';
 import gareRoutes from './src/routes/gareRoutes.js';
+import tesseratiRoutes from './src/routes/tesseratiRoutes.js';  // ← AGGIUNTO
+import rankingRoutes from './src/routes/rankingRoutes.js';
 
 dotenv.config();
 
@@ -16,10 +18,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: [
     'https://fibis-admin.vercel.app',
-        'https://fibis-admin-7f3a3zjdm-fibis.vercel.app',  // ← AGGIUNGI QUESTO
-    'https://fibismanutentori.vercel.app',     // ← underscores!
-    'https://fibisdirettori.vercel.app',      // ← underscores!
-    'https://fibispresidenti.vercel.app',     // ← underscores!
+    'https://fibis-admin-7f3a3zjdm-fibis.vercel.app',
+    'https://fibismanutentori.vercel.app',
+    'https://fibisdirettori.vercel.app',
+    'https://fibispresidenti.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000'
   ],
@@ -36,6 +38,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api', interventoRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', gareRoutes);
+app.use('/api/tesserati', tesseratiRoutes);  // ← AGGIUNTO
+app.use('/api/ranking', rankingRoutes);
+
 // Health check (sempre accessibile)
 app.get('/api/health', (req, res) => {
   res.json({ 
