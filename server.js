@@ -22,6 +22,7 @@ app.use(cors({
     'https://fibismanutentori.vercel.app',
     'https://fibisdirettori.vercel.app',
     'https://fibispresidenti.vercel.app',
+    'https://fibistesserati.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000'
   ],
