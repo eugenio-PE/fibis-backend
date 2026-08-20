@@ -94,7 +94,8 @@ export const createTesserato = async (req, res) => {
             codice_tessera,
             tipo_tessera,
             qualifica,
-            livello
+            livello,
+            categoria_ranking  // ← AGGIUNTO
         } = req.body;
 
         // Validazione base
@@ -139,7 +140,8 @@ export const createTesserato = async (req, res) => {
                 codice_tessera,
                 tipo_tessera,
                 qualifica,
-                livello
+                livello,
+                categoria_ranking  // ← AGGIUNTO
             })
             .select()
             .single();
@@ -186,7 +188,8 @@ export const updateTesserato = async (req, res) => {
             codice_tessera,
             tipo_tessera,
             qualifica,
-            livello
+            livello,
+            categoria_ranking  // ← AGGIUNTO
         } = req.body;
 
         // Verifica che il tesserato esista
@@ -239,6 +242,7 @@ export const updateTesserato = async (req, res) => {
                 tipo_tessera,
                 qualifica,
                 livello,
+                categoria_ranking,  // ← AGGIUNTO
                 updated_at: new Date().toISOString()
             })
             .eq('id', id)
@@ -332,7 +336,8 @@ export const importTesseratiFromCSV = async (req, res) => {
                     codice_tessera: row.codice_tessera,
                     tipo_tessera: row.tipo_tessera,
                     qualifica: row.qualifica,
-                    livello: row.livello
+                    livello: row.livello,
+                    categoria_ranking: row['Categoria Ranking'] || row['categoria_ranking'] || 'terza'  // ← AGGIUNTO
                 };
 
                 // Verifica che i campi obbligatori ci siano
