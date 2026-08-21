@@ -7,7 +7,8 @@ import {
     deleteTesserato,
     importTesseratiFromCSV,
     addStecca,
-    getStecche
+    getStecche,
+    uploadLogo  // ← AGGIUNTO
 } from '../controllers/tesseratiController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
@@ -36,5 +37,8 @@ router.post('/:id/stecca', authenticate, addStecca);
 
 // Rotta per ottenere le stecche di un tesserato (GET)
 router.get('/:id/stecca', authenticate, getStecche);
+
+// Rotta per upload logo sponsor personale (POST) - solo eccellenze
+router.post('/:id/logo', authenticate, uploadLogo);  // ← AGGIUNTO
 
 export default router;

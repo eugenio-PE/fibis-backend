@@ -87,7 +87,6 @@ export const createTesserato = async (req, res) => {
             stato = 'attivo',
             consenso_privacy = false,
             consenso_ranking = false,
-            // NUOVI CAMPI
             stagione,
             sesso,
             matricola,
@@ -95,7 +94,7 @@ export const createTesserato = async (req, res) => {
             tipo_tessera,
             qualifica,
             livello,
-            categoria_ranking  // ← AGGIUNTO
+            categoria_ranking
         } = req.body;
 
         // Validazione base
@@ -141,7 +140,7 @@ export const createTesserato = async (req, res) => {
                 tipo_tessera,
                 qualifica,
                 livello,
-                categoria_ranking  // ← AGGIUNTO
+                categoria_ranking
             })
             .select()
             .single();
@@ -189,7 +188,7 @@ export const updateTesserato = async (req, res) => {
             tipo_tessera,
             qualifica,
             livello,
-            categoria_ranking  // ← AGGIUNTO
+            categoria_ranking
         } = req.body;
 
         // Verifica che il tesserato esista
@@ -242,7 +241,7 @@ export const updateTesserato = async (req, res) => {
                 tipo_tessera,
                 qualifica,
                 livello,
-                categoria_ranking,  // ← AGGIUNTO
+                categoria_ranking,
                 updated_at: new Date().toISOString()
             })
             .eq('id', id)
@@ -337,7 +336,7 @@ export const importTesseratiFromCSV = async (req, res) => {
                     tipo_tessera: row.tipo_tessera,
                     qualifica: row.qualifica,
                     livello: row.livello,
-                    categoria_ranking: row['Categoria Ranking'] || row['categoria_ranking'] || 'terza'  // ← AGGIUNTO
+                    categoria_ranking: row['Categoria Ranking'] || row['categoria_ranking'] || 'terza'
                 };
 
                 // Verifica che i campi obbligatori ci siano
@@ -472,6 +471,60 @@ export const getStecche = async (req, res) => {
         res.json(data);
     } catch (error) {
         console.error('❌ Errore getStecche:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// ============================================================
+// POST /api/tesserati/:id/logo
+// Upload logo sponsor personale (solo eccellenze)
+// ============================================================
+export const uploadLogo = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { logo_url } = req.body;
+
+        if (!logo_url) {
+            return res.status(400).json({ error: 'URL del logo richiesto' });
+        }
+
+        // Verifica che il tesserato esista
+        const { data: tesserato, error: checkError } = await supabaseAdmin
+            .from('tesserati')
+            .select('id, categoria_ranking')
+            .eq('id', id)
+            .single();
+
+        if (checkError || !tesserato) {
+            return res.status(404).json({ error: 'Tesserato non trovato' });
+        }
+
+        // Verifica che sia un'eccellenza
+        const eccellenza = ['master', 'nazionali', 'nazionali_pro'].includes(
+            tesserato.categoria_ranking?.toLowerCase()
+        );
+
+        if (!eccellenza) {
+            return res.status(403).json({ error: 'Solo le categorie eccellenza possono avere un logo personale' });
+        }
+
+        // Aggiorna il logo
+        const { data, error } = await supabaseAdmin
+            .from('tesserati')
+            .update({ logo_sponsor_url: logo_url })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            message: 'Logo caricato con successo',
+            data
+        });
+    } catch (error) {
+        console.error('❌ Errore uploadLogo:', error);
         res.status(500).json({ error: error.message });
     }
 };
