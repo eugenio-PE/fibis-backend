@@ -14,7 +14,7 @@ export const getGare = async (req, res) => {
 
         // Filtra per disciplina (se fornita)
         if (disciplina) {
-            query = query.eq('tipo', disciplina);
+            query = query.eq('tipologia', disciplina);
         }
 
         // Filtra per tipologia (se fornita)
