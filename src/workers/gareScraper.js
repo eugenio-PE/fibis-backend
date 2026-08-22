@@ -6,20 +6,65 @@ import puppeteer from 'puppeteer';
 // ============================================================
 const BASE_URL = 'https://www.fibis.it/stecca/fibis-gare-stecca.html';
 
-// Parametri da testare (aggiungi/modifica secondo necessità)
+// 🔧 MODIFICA PER TEST: usa solo una tipologia e un comitato
 const TIPOLOGIE = [
-    { id: '2', nome: 'Fibis Challenge' },
     { id: '4', nome: 'Istituzionale' },
-    { id: '5', nome: 'Libera' },
-    { id: '6', nome: 'Riservata' },
 ];
 
 const COMITATI = [
     { id: '2', nome: 'Lombardia' },
-    { id: '6', nome: 'Lazio' },
-    { id: '12', nome: 'Sicilia' },
-    // Aggiungi altri comitati se necessario
 ];
+
+// ============================================================
+// MAPPA MESI ITALIANO → NUMERO
+// ============================================================
+const MESI_MAP = {
+    'gen': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'mag': 5, 'giu': 6,
+    'lug': 7, 'ago': 8, 'set': 9, 'ott': 10, 'nov': 11, 'dic': 12
+};
+
+// ============================================================
+// FUNZIONE PER PARSARE LA DATA
+// ============================================================
+function parseDataItaliana(giorno, mese) {
+    if (!giorno || !mese) return null;
+    
+    const meseNum = MESI_MAP[mese.toLowerCase()];
+    if (!meseNum) return null;
+    
+    const anno = new Date().getFullYear();
+    const dataStr = `${anno}-${String(meseNum).padStart(2, '0')}-${String(giorno).padStart(2, '0')}`;
+    const data = new Date(dataStr);
+    
+    // Verifica che la data sia valida
+    if (isNaN(data.getTime())) return null;
+    
+    return data;
+}
+
+// ============================================================
+// FUNZIONE PER PARSARE LE DATE DI ISCRIZIONE
+// ============================================================
+function parseIscrizioni(iscrizioniText) {
+    if (!iscrizioniText) return { inizio: null, fine: null };
+    
+    // Esempio: "Iscrizioni dal 04/05/2026 15:15 al 20/05/2026 13:00"
+    const match = iscrizioniText.match(/dal\s+(\d{2}\/\d{2}\/\d{4})\s+[\d:]+\s+al\s+(\d{2}\/\d{2}\/\d{4})/);
+    if (!match) return { inizio: null, fine: null };
+    
+    const [_, inizioStr, fineStr] = match;
+    
+    // Converti formato DD/MM/YYYY → YYYY-MM-DD
+    const parseData = (str) => {
+        const [day, month, year] = str.split('/');
+        return `${year}-${month}-${day}`;
+    };
+    
+    return {
+        inizio: parseData(inizioStr),
+        fine: parseData(fineStr)
+    };
+}
 
 // ============================================================
 // FUNZIONE PRINCIPALE
@@ -38,18 +83,15 @@ export async function scrapeGare() {
     try {
         for (const tipologia of TIPOLOGIE) {
             for (const comitato of COMITATI) {
-                // Costruisci l'URL con i parametri
                 const url = `${BASE_URL}?id_tipologia=${tipologia.id}&id_comitato=${comitato.id}`;
                 console.log(`\n📂 Scraping: ${tipologia.nome} - ${comitato.nome}`);
                 console.log(`🔗 URL: ${url}`);
 
-                // Vai alla pagina
                 await page.goto(url, {
                     waitUntil: 'networkidle2',
                     timeout: 30000
                 });
 
-                // Accetta i cookie (se presente il banner)
                 try {
                     await page.waitForSelector('#iubenda-cs-banner .iubenda-cs-accept-btn', { timeout: 3000 });
                     await page.click('#iubenda-cs-banner .iubenda-cs-accept-btn');
@@ -59,10 +101,8 @@ export async function scrapeGare() {
                     // Nessun banner cookie
                 }
 
-                // Aspetta che le gare vengano caricate
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
-                // Controlla se ci sono gare
                 const gareCount = await page.evaluate(() => {
                     return document.querySelectorAll('.current_match').length;
                 });
@@ -70,7 +110,6 @@ export async function scrapeGare() {
                 console.log(`  📊 Gare trovate: ${gareCount}`);
 
                 if (gareCount > 0) {
-                    // Estrai i dati delle gare
                     const gare = await page.evaluate(() => {
                         const items = document.querySelectorAll('.current_match');
                         return Array.from(items).map(item => {
@@ -82,23 +121,13 @@ export async function scrapeGare() {
                             const linkLocandina = item.querySelector('.locandina')?.href || '';
                             const isInternational = item.closest('.international') !== null;
                             
-                            // Determina la tipologia dal contesto
                             let tipologia = 'Istituzionale';
                             if (item.closest('.challenge')) tipologia = 'Fibis Challenge';
                             else if (item.closest('.libera')) tipologia = 'Libera';
                             else if (item.closest('.riservata')) tipologia = 'Riservata';
                             
-                            // Estrai categoria (es. "1^CATEGORIA", "2^CATEGORIA", "3^CATEGORIA")
                             const categoriaMatch = titolo.match(/(\d+)\s*[^CATEGORIA]*CATEGORIA/i);
                             const categoria = categoriaMatch ? `${categoriaMatch[1]}ª Categoria` : null;
-                            
-                            // Estrai regione dal contesto o dal comitato
-                            // La regione è determinata dal comitato selezionato
-                            let regione = null;
-                            if (item.closest('.comitato')) {
-                                const comitatoEl = item.closest('.comitato');
-                                regione = comitatoEl?.textContent?.trim() || null;
-                            }
 
                             return {
                                 titolo,
@@ -109,18 +138,23 @@ export async function scrapeGare() {
                                 linkLocandina,
                                 isInternational,
                                 tipologia,
-                                categoria,      // ← NUOVO
-                                regione,        // ← NUOVO
+                                categoria,
                             };
                         });
                     });
 
-                    // Salva in Supabase
-                    await saveGare(gare);
+                    console.log('  📝 DEBUG - Prime 3 gare estratte:');
+                    gare.slice(0, 3).forEach((g, i) => {
+                        console.log(`    ${i+1}. Titolo: "${g.titolo}"`);
+                        console.log(`       Giorno: "${g.giorno}", Mese: "${g.mese}"`);
+                        console.log(`       Iscrizioni: "${g.iscrizioni}"`);
+                        console.log(`       ---`);
+                    });
+
+                    await saveGare(gare, comitato.nome);
                     totaleGare += gare.length;
                 }
 
-                // Pausa tra una richiesta e l'altra
                 await new Promise(resolve => setTimeout(resolve, 1500));
             }
         }
@@ -141,7 +175,7 @@ export async function scrapeGare() {
 // ============================================================
 // SALVATAGGIO IN SUPABASE
 // ============================================================
-async function saveGare(gare) {
+async function saveGare(gare, regioneDefault) {
     console.log('  💾 Salvataggio in Supabase...');
 
     let saved = 0;
@@ -149,40 +183,47 @@ async function saveGare(gare) {
 
     for (const gara of gare) {
         try {
-            // Costruisci la data (giorno/mese - anno corrente)
-            const dataStr = `${gara.giorno}/${gara.mese}/${new Date().getFullYear()}`;
-            const data = new Date(dataStr);
+            // 1. Parserizza la data della gara
+            const dataGara = parseDataItaliana(gara.giorno, gara.mese);
+            if (!dataGara) {
+                console.log(`    ⏭️ Salto: ${gara.titolo} - data non parsabile`);
+                continue;
+            }
 
-            // Verifica se la gara esiste già
+            // 2. Parserizza le date di iscrizione
+            const iscrizioni = parseIscrizioni(gara.iscrizioni);
+
+            // 3. Verifica se la gara esiste già
             const { data: existing } = await supabaseAdmin
                 .from('gare')
                 .select('id')
                 .eq('nome', gara.titolo)
-                .eq('data_gara', data.toISOString().split('T')[0])
+                .eq('data_gara', dataGara.toISOString().split('T')[0])
                 .maybeSingle();
 
             if (existing) {
-                // console.log(`    ⏭️ Gara già esistente: ${gara.titolo}`);
                 continue;
             }
 
-            // Inserisci la nuova gara
-            const { error } = await supabaseAdmin
-                .from('gare')
-                .insert({
-                    nome: gara.titolo,
-                    data_gara: data.toISOString().split('T')[0],
-                    id_asd: null,
-                    id_direttore: null,
-                    nulla_osta: null,
-                    tipologia: gara.tipologia,
-                    categoria: gara.categoria,     // ← NUOVO
-                    regione: gara.regione,         // ← NUOVO
-                    stato: 'programmata',
-                    inserito_da: null,
-                    inserito_il: new Date().toISOString(),
-                    note: `Luogo: ${gara.luogo}`,
-                });
+// 4. Inserisci la nuova gara
+const { error } = await supabaseAdmin
+    .from('gare')
+    .insert({
+        nome: gara.titolo,
+        data_gara: dataGara.toISOString().split('T')[0],
+        id_asd: null,
+        id_direttore: null,
+        nulla_osta: 'N/A',  // Valore di default
+        tipologia: gara.tipologia.toLowerCase(),  // ← MODIFICA QUI (aggiungi .toLowerCase())
+        categoria: gara.categoria,
+        regione: regioneDefault,
+        stato: 'programmata',
+        inserito_da: null,
+        inserito_il: new Date().toISOString(),
+        data_inizio_iscrizioni: iscrizioni.inizio,
+        data_fine_iscrizioni: iscrizioni.fine,
+        note: `Luogo: ${gara.luogo}`,
+    });
 
             if (error) throw error;
             saved++;
