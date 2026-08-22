@@ -8,10 +8,79 @@ const router = express.Router();
 // ROTTE PER GARE
 // ============================================
 
-// GET: Lista tutte le gare CON CONTEGGIO VERIFICHE (usata dalla Dashboard Admin)
+// ============================================================
+// GET /api/gare (PUBBLICA PER APP TESSERATI)
+// Lista tutte le gare con filtri (disciplina, tipologia, regione, categoria, aperte)
+// ============================================================
 router.get('/gare', authenticate, async (req, res) => {
   try {
+    const { disciplina, tipologia, regione, categoria, aperte } = req.query;
+
     console.log('🔵 GET /gare - req.userId:', req.userId);
+
+    if (!req.userId) {
+      console.error('❌ req.userId è undefined!');
+      return res.status(401).json({ error: 'Utente non autenticato' });
+    }
+
+    let query = supabaseAdmin
+      .from('gare')
+      .select('*');
+
+    // Filtra per disciplina (se fornita)
+    if (disciplina) {
+      query = query.eq('tipo', disciplina);
+    }
+
+    // Filtra per tipologia (se fornita)
+    if (tipologia) {
+      query = query.eq('tipologia', tipologia);
+    }
+
+    // Filtra per regione (se fornita)
+    if (regione) {
+      query = query.eq('regione', regione);
+    }
+
+    // Filtra per categoria (se fornita)
+    if (categoria) {
+      query = query.eq('categoria', categoria);
+    }
+
+    // Filtra solo gare con iscrizioni aperte (dal giorno prima dell'apertura fino alla chiusura)
+    if (aperte === 'true') {
+      const oggi = new Date();
+      const oggiStr = oggi.toISOString().split('T')[0];
+      const ieriStr = new Date(oggi.setDate(oggi.getDate() - 1)).toISOString().split('T')[0];
+      
+      // Gare visibili se: data_inizio_iscrizioni <= oggi <= data_fine_iscrizioni
+      // Oppure se oggi è il giorno prima dell'apertura (data_inizio_iscrizioni = domani)
+      query = query
+        .or(`data_inizio_iscrizioni.lte.${oggiStr},data_inizio_iscrizioni.eq.${new Date(Date.now() + 86400000).toISOString().split('T')[0]}`)
+        .gte('data_fine_iscrizioni', oggiStr);
+    }
+
+    // Ordina per data
+    const { data, error } = await query
+      .order('data_gara', { ascending: true });
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET /gare:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// ROTTE ESISTENTI
+// ============================================================
+
+// GET: Lista tutte le gare CON CONTEGGIO VERIFICHE (usata dalla Dashboard Admin)
+router.get('/gare-admin', authenticate, async (req, res) => {
+  try {
+    console.log('🔵 GET /gare-admin - req.userId:', req.userId);
 
     if (!req.userId) {
       console.error('❌ req.userId è undefined!');
@@ -63,12 +132,12 @@ router.get('/gare', authenticate, async (req, res) => {
     console.log('✅ Gare trovate:', gareConVerifiche?.length || 0);
     res.json(gareConVerifiche);
   } catch (error) {
-    console.error('❌ Errore GET /gare:', error);
+    console.error('❌ Errore GET /gare-admin:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET: Lista gare per ASD (SPOSTATA SOPRA /gare/:id PER EVITARE CONFLITTI DI ROUTING)
+// GET: Lista gare per ASD
 router.get('/gare/asd/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -89,7 +158,7 @@ router.get('/gare/asd/:id', authenticate, async (req, res) => {
   }
 });
 
-// GET: Lista gare per Direttore (SPOSTATA SOPRA /gare/:id)
+// GET: Lista gare per Direttore
 router.get('/gare/direttore/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -155,7 +224,6 @@ router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
 });
 
 // GET: Lista verifiche DETTAGLIO per gara (usata dalla Dashboard Admin per il modal)
-// Questa route è specifica per l'admin e permette di vedere tutte le verifiche con dettagli
 router.get('/gare/:id/verifiche-dettaglio', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -249,7 +317,6 @@ router.post('/gare', authenticate, async (req, res) => {
     const isPresidente = manutentore.ruolo === 'presidente';
 
     // 3. Verifica dell'autorizzazione
-    // Il presidente può creare solo gare di tipologia 'libera'
     const canInsert = isAdmin || isSettoreTecnico || (isPresidente && tipologia === 'libera');
 
     console.log('🔍 [POST /gare] - Esito controlli autorizzazione:', {
@@ -270,7 +337,7 @@ router.post('/gare', authenticate, async (req, res) => {
     // Sanificazione dati di input
     const parsedDirettoreId = id_direttore ? Number(id_direttore) : null;
 
-    // 4. Inserimento della gara su Supabase - MODIFICA: stato ora è 'programmata'
+    // 4. Inserimento della gara su Supabase
     const { data: nuovaGara, error: insertError } = await supabaseAdmin
       .from('gare')
       .insert({
@@ -279,7 +346,7 @@ router.post('/gare', authenticate, async (req, res) => {
         nulla_osta,
         tipologia,
         data_gara,
-        stato: 'programmata',  // ✅ MODIFICA FATTA: da 'inserita' a 'programmata'
+        stato: 'programmata',
         inserito_da: manutentore.id,
         note,
       })

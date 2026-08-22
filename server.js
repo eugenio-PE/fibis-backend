@@ -6,7 +6,7 @@ import interventoRoutes from './src/routes/interventoRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import { supabase } from './src/config/supabase.js';
 import gareRoutes from './src/routes/gareRoutes.js';
-import tesseratiRoutes from './src/routes/tesseratiRoutes.js';  // ← AGGIUNTO
+import tesseratiRoutes from './src/routes/tesseratiRoutes.js';
 import rankingRoutes from './src/routes/rankingRoutes.js';
 
 dotenv.config();
@@ -38,8 +38,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api', interventoRoutes);
 app.use('/api', adminRoutes);
-app.use('/api', gareRoutes);
-app.use('/api/tesserati', tesseratiRoutes);  // ← AGGIUNTO
+app.use('/api', gareRoutes);          // ← gareRoutes (contiene /gare, /gare-admin, /gare/:id, ecc.)
+app.use('/api/tesserati', tesseratiRoutes);
 app.use('/api/ranking', rankingRoutes);
 
 // Health check (sempre accessibile)
