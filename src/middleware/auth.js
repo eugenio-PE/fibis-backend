@@ -4,13 +4,17 @@ export async function authenticate(req, res, next) {
   try {
     console.log('🔵 [1] authenticate - INIZIO');
 
-    const token = req.headers.authorization?.split(' ')[1];
+    let token = req.headers.authorization?.split(' ')[1];
     console.log('🔵 [2] Token ricevuto:', token ? `SI (prime 20 caratteri: ${token.substring(0, 20)}...)` : 'NO');
 
     if (!token) {
       console.log('❌ [3] Token non fornito');
       return res.status(401).json({ error: 'Token non fornito' });
     }
+
+    // 🔧 PULISCI IL TOKEN: rimuovi virgolette, spazi e caratteri extra
+    token = token.trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+    console.log('🔵 [2b] Token pulito:', token ? `SI (prime 20 caratteri: ${token.substring(0, 20)}...)` : 'NO');
 
     console.log('🔵 [4] Verifica token con Supabase...');
     const { data: { user }, error } = await supabase.auth.getUser(token);
@@ -46,10 +50,10 @@ export function requireRole(roles = []) {
       console.log('🔵 [12] req.userId:', req.userId);
 
       const { data: manutentore, error } = await supabaseAdmin
-  .from('manutentori')
-  .select('ruolo')
-  .eq('user_id', req.userId)
-  .maybeSingle();  // ← CAMBIA QUI!
+        .from('manutentori')
+        .select('ruolo')
+        .eq('user_id', req.userId)
+        .maybeSingle();
 
       if (error) {
         console.error('❌ [13] Errore query manutentori:', error.message);
