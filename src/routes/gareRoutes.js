@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { supabaseAdmin } from '../config/supabase.js';
+import { iscrivitiGara } from '../controllers/gareController.js';  // ← AGGIUNGI QUESTO IMPORT
 
 const router = express.Router();
 
@@ -483,5 +484,10 @@ router.delete('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico'
     res.status(500).json({ error: error.message });
   }
 });
+
+// ============================================================
+// POST: Iscrizione automatica a una gara (solo per tesserati autenticati)
+// ============================================================
+router.post('/gare/:id/iscriviti', authenticate, iscrivitiGara);
 
 export default router;

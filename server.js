@@ -8,6 +8,7 @@ import { supabase } from './src/config/supabase.js';
 import gareRoutes from './src/routes/gareRoutes.js';
 import tesseratiRoutes from './src/routes/tesseratiRoutes.js';
 import rankingRoutes from './src/routes/rankingRoutes.js';
+import credenzialiRoutes from './src/routes/credenzialiRoutes.js';
 
 dotenv.config();
 
@@ -41,6 +42,7 @@ app.use('/api', adminRoutes);
 app.use('/api', gareRoutes);          // ← gareRoutes (contiene /gare, /gare-admin, /gare/:id, ecc.)
 app.use('/api/tesserati', tesseratiRoutes);
 app.use('/api/ranking', rankingRoutes);
+app.use('/api/presidenti', credenzialiRoutes);
 
 // Health check (sempre accessibile)
 app.get('/api/health', (req, res) => {

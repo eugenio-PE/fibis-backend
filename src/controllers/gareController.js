@@ -133,6 +133,125 @@ export const createGara = async (req, res) => {
 };
 
 // ============================================================
+// POST /api/gare/:id/iscriviti
+// Iscrizione automatica di un tesserato a una gara
+// ============================================================
+export const iscrivitiGara = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { id_tesserato, giorno_iscrizione } = req.body;
+        const userId = req.userId;
+
+        console.log(`📝 Iscrizione richiesta: gara=${id}, tesserato=${id_tesserato}, giorno=${giorno_iscrizione}`);
+
+        // 1. Verifica che l'utente sia autenticato e sia un tesserato
+        const { data: tesserato, error: tesseratoError } = await supabaseAdmin
+            .from('tesserati')
+            .select('id, nome, cognome, user_id')
+            .eq('id', id_tesserato)
+            .eq('user_id', userId)
+            .single();
+
+        if (tesseratoError || !tesserato) {
+            console.error('❌ Tesserato non trovato o non autorizzato:', tesseratoError);
+            return res.status(403).json({ 
+                error: 'Non autorizzato o tesserato non trovato' 
+            });
+        }
+
+        console.log(`✅ Tesserato verificato: ${tesserato.nome} ${tesserato.cognome}`);
+
+        // 2. Verifica che la gara esista e sia aperta
+        const { data: gara, error: garaError } = await supabaseAdmin
+            .from('gare')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (garaError || !gara) {
+            console.error('❌ Gara non trovata:', garaError);
+            return res.status(404).json({ error: 'Gara non trovata' });
+        }
+
+        console.log(`✅ Gara verificata: ${gara.nome}`);
+
+        // 3. Verifica che le iscrizioni siano aperte
+        const oggi = new Date().toISOString().split('T')[0];
+        if (!gara.data_inizio_iscrizioni || !gara.data_fine_iscrizioni) {
+            return res.status(400).json({ error: 'Date iscrizioni non configurate' });
+        }
+        if (gara.data_inizio_iscrizioni > oggi || gara.data_fine_iscrizioni < oggi) {
+            console.log(`⏳ Iscrizioni non aperte: inizio=${gara.data_inizio_iscrizioni}, fine=${gara.data_fine_iscrizioni}, oggi=${oggi}`);
+            return res.status(400).json({ error: 'Iscrizioni non aperte per questa gara' });
+        }
+
+        console.log(`✅ Iscrizioni aperte: ${gara.data_inizio_iscrizioni} → ${gara.data_fine_iscrizioni}`);
+
+        // 4. Verifica che il tesserato non sia già iscritto
+        const { data: existing, error: existingError } = await supabaseAdmin
+            .from('iscrizioni_gare')
+            .select('id, stato')
+            .eq('id_gara', id)
+            .eq('id_tesserato', id_tesserato)
+            .maybeSingle();
+
+        if (existing) {
+            if (existing.stato === 'completata') {
+                return res.status(400).json({ error: 'Tesserato già iscritto a questa gara' });
+            }
+            if (existing.stato === 'in_attesa' || existing.stato === 'in_corso') {
+                return res.status(400).json({ error: 'Iscrizione già in corso' });
+            }
+        }
+
+        // 5. Crea l'iscrizione nel database
+        const { data: iscrizione, error: iscrizioneError } = await supabaseAdmin
+            .from('iscrizioni_gare')
+            .insert({
+                id_gara: parseInt(id),
+                id_tesserato: parseInt(id_tesserato),
+                giorno_iscrizione: giorno_iscrizione,
+                stato: 'in_attesa'
+            })
+            .select()
+            .single();
+
+        if (iscrizioneError) {
+            console.error('❌ Errore creazione iscrizione:', iscrizioneError);
+            throw iscrizioneError;
+        }
+
+        console.log(`✅ Iscrizione creata: ${iscrizione.id}`);
+
+        // 6. Avvia il worker in background (senza aspettare)
+        import('../workers/iscrizioneWorker.js').then(({ eseguiIscrizioneGara }) => {
+            eseguiIscrizioneGara(iscrizione.id)
+                .then(result => {
+                    console.log(`✅ Iscrizione ${iscrizione.id} completata:`, result);
+                })
+                .catch(error => {
+                    console.error(`❌ Iscrizione ${iscrizione.id} fallita:`, error);
+                });
+        });
+
+        // 7. Restituisci risposta immediata
+        res.status(201).json({
+            success: true,
+            message: 'Iscrizione avviata',
+            data: {
+                id_iscrizione: iscrizione.id,
+                stato: iscrizione.stato,
+                tesserato: `${tesserato.nome} ${tesserato.cognome}`,
+                gara: gara.nome
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Errore iscrivitiGara:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+// ============================================================
 // PUT /api/gare/:id
 // Aggiorna una gara esistente (solo admin)
 // ============================================================
