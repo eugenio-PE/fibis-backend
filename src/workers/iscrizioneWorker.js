@@ -2,6 +2,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import puppeteer from 'puppeteer';
 import dotenv from 'dotenv';
+import { getCredenzialiPerPuppeteer } from '../controllers/credenzialiController.js';
 dotenv.config();
 
 // ============================================================
@@ -43,36 +44,96 @@ export async function eseguiIscrizioneGara(idIscrizione) {
         console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
         console.log(`  - Giorno: ${iscrizione.giorno_iscrizione}`);
 
-        // 2. Recupera le credenziali del presidente
-        // ... (da implementare con la tabella credenziali_portale_presidenti)
+        // 2. Recupera le credenziali del presidente dal database (cifrate)
+        // Recupera l'ASD della gara per trovare il presidente
+        const { data: gara, error: garaError } = await supabaseAdmin
+            .from('gare')
+            .select('id_asd')
+            .eq('id', iscrizione.id_gara)
+            .single();
 
-        // 3. Login sul portale
+        if (garaError || !gara) {
+            throw new Error(`Gara non trovata: ${iscrizione.id_gara}`);
+        }
+
+        // Trova il presidente dell'ASD
+        const { data: presidente, error: presidenteError } = await supabaseAdmin
+            .from('manutentori')
+            .select('id')
+            .eq('asd_id', gara.id_asd)
+            .eq('ruolo', 'presidente')
+            .single();
+
+        if (presidenteError || !presidente) {
+            throw new Error(`Presidente non trovato per ASD: ${gara.id_asd}`);
+        }
+
+        // Recupera le credenziali del presidente (decifrate)
+        const credenziali = await getCredenzialiPerPuppeteer(presidente.id);
+        console.log(`🔑 Credenziali recuperate per: ${credenziali.username}`);
+
+        // 3. Imposta user agent realistico
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+        // 4. Login sul portale
         console.log('🌐 Navigazione al portale...');
         await page.goto(PORTALE_URL, {
             waitUntil: 'networkidle2',
             timeout: 30000
         });
 
-        // 4. Login
-        await page.type('input[name="username"]', process.env.PRESIDENTE_USERNAME);
-        await page.type('input[name="password"]', process.env.PRESIDENTE_PASSWORD);
-        await page.click('button[type="submit"]');
-        await page.waitForNavigation();
+        console.log('👤 Inserimento credenziali...');
+        // 🔧 SELETTORI CORRETTI (trovati con il test)
+        await page.type('#edit-name', credenziali.username);
+        await page.type('#edit-pass', credenziali.password);
+        await page.click('#edit-submit-1');
+
+        console.log('⏳ Attesa login...');
+        await page.waitForNavigation({
+            waitUntil: 'networkidle2',
+            timeout: 30000
+        });
+
+        console.log('✅ Login completato!');
 
         // 5. Navigazione alla gara
-        // ... (da implementare)
+        // Costruisci l'URL della gara con l'ID evento
+        const idE = iscrizione.gare.id; // O il campo corretto per l'ID evento
+        console.log(`🔗 Navigazione alla gara: ${idE}`);
+        await page.goto(`https://tesseramento.fibis.it/GS_accreditiEvento?idE=SE_${idE}`, {
+            waitUntil: 'networkidle2',
+            timeout: 30000
+        });
 
         // 6. Selezione del giorno
-        // ... (da implementare)
+        console.log(`📅 Selezione giorno: ${iscrizione.giorno_iscrizione}`);
+        // Formatta la data nel formato atteso dal select
+        // Esempio: "24/08/2026 18:30 - LUNEDÌ"
+        // Per ora usiamo un selettore generico, da migliorare con dati reali
+        const giornoFormattato = iscrizione.giorno_iscrizione; // Da formattare correttamente
+        await page.select('select[name="turnoF_fAcc"]', giornoFormattato);
 
         // 7. Apertura dialog iscrizione
-        // ... (da implementare)
+        console.log('📂 Apertura dialog iscrizione...');
+        await page.evaluate(() => {
+            nuovaIscrizione('', '');
+        });
+        await page.waitForSelector('#dialog-dettagliIscrizione', { visible: true });
+        console.log('✅ Dialog aperto!');
 
         // 8. Selezione atleta
-        // ... (da implementare)
+        console.log(`🔍 Ricerca atleta: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
+        // Digita il cognome dell'atleta
+        await page.type('input[name="cognome_fAcc"]', iscrizione.tesserati.cognome);
+        await page.waitForTimeout(1000);
+        
+        // Clicca sul pulsante "Aggiungi" nella tabella (selettore da definire)
+        // await page.click('#elencoAtleti tbody tr:first-child td:last-child button');
 
         // 9. Salva modifiche
-        // ... (da implementare)
+        console.log('💾 Salvataggio iscrizione...');
+        await page.click('button:contains("Salva modifiche")');
+        await page.waitForTimeout(2000);
 
         // 10. Aggiorna stato iscrizione
         await supabaseAdmin
