@@ -1,0 +1,113 @@
+text: '', className: 'button', …}
+🎉🎉🎉 PERFETTO! ABBIAMO TUTTO! 🎉🎉🎉
+📋 STRUTTURA COMPLETA CONFERMATA AL 100%
+Tipologia	Pulsante Cerca	ID Tipologia
+Fibis Challenge / Internazionale	#btn_internazionale	2
+Istituzionale	#btn_istituzionale	4
+Libera	#btn_libera	5
+Riservata	#btn_riservata	6
+🏗️ CODICE DI NAVIGAZIONE COMPLETO (CONFERMATO)
+javascript
+// ============================================================
+// MAPPE CONFERMATE
+// ============================================================
+
+const TIPOLOGIA_MAP = {
+    'internazionale': { id: '2', btn: '#btn_internazionale', hasComitato: false },
+    'fibis challenge': { id: '2', btn: '#btn_internazionale', hasComitato: false },
+    'istituzionale': { id: '4', btn: '#btn_istituzionale', hasComitato: true },
+    'libera': { id: '5', btn: '#btn_libera', hasComitato: true },
+    'riservata': { id: '6', btn: '#btn_riservata', hasComitato: true },
+};
+
+// ============================================================
+// NAVIGAZIONE PER TIPOLOGIA
+// ============================================================
+
+async function navigaPerTipologia(page, tipologia, comitatoId = null) {
+    const config = TIPOLOGIA_MAP[tipologia.toLowerCase()];
+    if (!config) {
+        throw new Error(`Tipologia non supportata: ${tipologia}`);
+    }
+    
+    // Vai alla pagina
+    await page.goto('https://www.fibis.it/stecca/fibis-gare-stecca.html', {
+        waitUntil: 'networkidle2'
+    });
+    
+    // Seleziona tipologia
+    await page.select('#id_tipologia', config.id);
+    
+    // Seleziona comitato (se necessario e fornito)
+    if (config.hasComitato && comitatoId) {
+        await page.select('#id_comitato', comitatoId);
+    }
+    
+    // Clicca sul pulsante Cerca specifico
+    await page.click(config.btn);
+    
+    // Aspetta i risultati
+    await page.waitForSelector('.current_match', { timeout: 15000 });
+    
+    // Estrai le gare
+    const gare = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('.current_match')).map(item => ({
+            titolo: item.querySelector('.info h5')?.textContent?.trim(),
+            giorno: item.querySelector('.date_cont .day')?.textContent?.trim(),
+            mese: item.querySelector('.date_cont .month')?.textContent?.trim(),
+            eventoId: item.querySelector('.date_cont')?.getAttribute('evento-id'),
+            luogo: item.querySelector('.loc')?.textContent?.trim(),
+            iscrizioni: item.querySelector('.iscrizioni')?.textContent?.trim(),
+            haTabellone: !!item.querySelector('.tabelloni'),
+            haBatterie: !!item.querySelector('.gironi'),
+            haLocandina: !!item.querySelector('.locandina')
+        }));
+    });
+    
+    return gare;
+}
+📋 RIEPILOGO FINALE - TUTTI I SELETTORI
+Elemento	Selettore	Tipo	Valore/Note
+Tipologia	#id_tipologia	Select	2=Challenge, 4=Istituzionale, 5=Libera, 6=Riservata
+Comitato	#id_comitato	Select	17 regioni
+Regione	#id_regione	Select	18 regioni
+Provincia	#id_provincia	Select	Province
+Cerca Challenge	#btn_internazionale	Input button	value="cerca"
+Cerca Istituzionale	#btn_istituzionale	Input button	value="cerca"
+Cerca Libera	#btn_libera	Input button	value="cerca"
+Cerca Riservata	#btn_riservata	Input button	value="cerca"
+Lista gare	.current_match	Container	Ogni gara
+Titolo	.info h5	Testo	Nome gara
+Data giorno	.date_cont .day	Testo	Giorno
+Data mese	.date_cont .month	Testo	Mese
+Luogo	.loc	Testo	Luogo
+Iscrizioni	.iscrizioni	Testo	Date iscrizioni
+Evento ID	.date_cont[evento-id]	Attributo	ID unico
+Tabellone	.tabelloni	Bottone	Apre tabellone
+Batterie	.gironi	Bottone	Apre batterie
+Locandina	.locandina	Bottone	Apre PDF
+✅ ORA ABBIAMO TUTTO PER:
+gareScraper.js - Scraping delle gare (già funzionante)
+
+risultatiScraper.js - Scraping dei risultati (possiamo implementarlo)
+
+Navigazione completa - Tutti i selettori confermati
+
+🚀 PROSSIMO PASSO
+Vuoi che implementiamo ora risultatiScraper.js completo con:
+
+Navigazione per tipologia/comitato
+
+Filtro gare "calde"
+
+Scraping tabellone finale
+
+Scraping batterie (limitate)
+
+Salvataggio in Supabase
+
+Tracciamento giornate scrappate
+
+Oppure vuoi prima testare la navigazione dal browser con un altro comando?
+
+Fammi sapere! 🎯
