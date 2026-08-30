@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+
+// ✅ CARICA LE VARIABILI D'AMBIENTE SUBITO
+dotenv.config();
+
+// ✅ POI IMPORTI TUTTO IL RESTO
 import authRoutes from './src/routes/authRoutes.js';
 import interventoRoutes from './src/routes/interventoRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
@@ -9,11 +14,9 @@ import gareRoutes from './src/routes/gareRoutes.js';
 import tesseratiRoutes from './src/routes/tesseratiRoutes.js';
 import rankingRoutes from './src/routes/rankingRoutes.js';
 import credenzialiRoutes from './src/routes/credenzialiRoutes.js';
-import notificationRoutes from './src/routes/notificationRoutes.js'; 
+import notificationRoutes from './src/routes/notificationRoutes.js';
 // ✅ AVVIA IL CRON JOB ALL'AVVIO DEL SERVER
 import './src/workers/cron.js';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
