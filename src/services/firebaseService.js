@@ -1,50 +1,57 @@
 // src/services/firebaseService.js
-import { initializeApp, cert } from 'firebase-admin/app';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 
 let firebaseApp = null;
 let messaging = null;
 
-function initFirebase() {
+function getFirebaseApp() {
     if (firebaseApp) return firebaseApp;
 
-    try {
-        // 🔥 USA LE VARIABILI D'AMBIENTE (Railway)
-        const projectId = process.env.FIREBASE_PROJECT_ID;
-        const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-        const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-
-        if (!projectId || !clientEmail || !privateKey) {
-            console.error('❌ Variabili d\'ambiente Firebase mancanti!');
-            console.error('   FIREBASE_PROJECT_ID:', projectId ? '✅' : '❌');
-            console.error('   FIREBASE_CLIENT_EMAIL:', clientEmail ? '✅' : '❌');
-            console.error('   FIREBASE_PRIVATE_KEY:', privateKey ? '✅' : '❌');
-            return null;
-        }
-
-        console.log('✅ Firebase inizializzato con variabili d\'ambiente');
-        console.log('   Project ID:', projectId);
-
-        firebaseApp = initializeApp({
-            credential: cert({
-                projectId,
-                clientEmail,
-                privateKey,
-            }),
-        });
-
+    // ✅ Controlla se Firebase è già inizializzato
+    if (getApps().length > 0) {
+        firebaseApp = getApps()[0];
         messaging = getMessaging(firebaseApp);
-        console.log('✅ Firebase Admin inizializzato correttamente');
         return firebaseApp;
-    } catch (error) {
-        console.error('❌ Errore inizializzazione Firebase:', error.message);
+    }
+
+    // 🔥 USA LE VARIABILI D'AMBIENTE (Railway)
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+    if (!projectId || !clientEmail || !privateKey) {
+        console.error('❌ Variabili d\'ambiente Firebase mancanti!');
+        console.error('   FIREBASE_PROJECT_ID:', projectId ? '✅' : '❌');
+        console.error('   FIREBASE_CLIENT_EMAIL:', clientEmail ? '✅' : '❌');
+        console.error('   FIREBASE_PRIVATE_KEY:', privateKey ? '✅' : '❌');
         return null;
     }
+
+    // ✅ Gestisce le newline e le virgolette
+    privateKey = privateKey
+        .replace(/^"(.*)"$/, '$1')  // Rimuove virgolette esterne
+        .replace(/\\n/g, '\n');      // Converte \n in newline
+
+    console.log('✅ Firebase inizializzato con variabili d\'ambiente');
+    console.log('   Project ID:', projectId);
+
+    firebaseApp = initializeApp({
+        credential: cert({
+            projectId,
+            clientEmail,
+            privateKey,
+        }),
+    });
+
+    messaging = getMessaging(firebaseApp);
+    console.log('✅ Firebase Admin inizializzato correttamente');
+    return firebaseApp;
 }
 
 export async function sendPushNotification(fcmToken, title, body, data = null) {
     try {
-        const app = initFirebase();
+        const app = getFirebaseApp();  // ← INIZIALIZZA QUI
         if (!app) {
             console.log('❌ Firebase non configurato, notifica non inviata');
             return null;
@@ -69,7 +76,7 @@ export async function sendPushNotification(fcmToken, title, body, data = null) {
 
 export async function sendPushNotificationMultiple(fcmTokens, title, body, data = null) {
     try {
-        const app = initFirebase();
+        const app = getFirebaseApp();  // ← INIZIALIZZA QUI
         if (!app) {
             console.log('❌ Firebase non configurato, notifiche non inviate');
             return null;
