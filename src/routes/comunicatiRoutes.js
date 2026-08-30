@@ -8,12 +8,11 @@ const router = express.Router();
 // ============================================================
 // 1. CREA UN NUOVO COMUNICATO (SOLO ADMIN)
 // ============================================================
-router.post('/comunicati', authenticate, async (req, res) => {
+router.post('/', authenticate, async (req, res) => {
     try {
         const { titolo, contenuto, destinatari, priorita, data_scadenza } = req.body;
         const userId = req.user.id;
 
-        // Verifica che l'utente sia un manutentore/admin
         const { data: user, error: userError } = await supabaseAdmin
             .from('manutentori')
             .select('id, ruolo')
@@ -24,7 +23,6 @@ router.post('/comunicati', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'Non autorizzato' });
         }
 
-        // Solo admin o presidenti possono creare comunicati
         if (!['admin', 'presidente'].includes(user.ruolo)) {
             return res.status(403).json({ error: 'Permessi insufficienti' });
         }
@@ -48,9 +46,6 @@ router.post('/comunicati', authenticate, async (req, res) => {
             return res.status(400).json({ error: error.message });
         }
 
-        // 🔥 TODO: Invia notifica push ai destinatari
-        // await inviaNotificaComunicato(data);
-
         res.status(201).json({ success: true, comunicato: data });
 
     } catch (error) {
@@ -62,11 +57,10 @@ router.post('/comunicati', authenticate, async (req, res) => {
 // ============================================================
 // 2. OTTIENI I COMUNICATI PER UN UTENTE
 // ============================================================
-router.get('/comunicati', authenticate, async (req, res) => {
+router.get('/', authenticate, async (req, res) => {
     try {
         const userId = req.user.id;
 
-        // Ottieni il ruolo dell'utente
         const { data: user, error: userError } = await supabaseAdmin
             .from('manutentori')
             .select('ruolo')
@@ -77,10 +71,8 @@ router.get('/comunicati', authenticate, async (req, res) => {
             return res.status(400).json({ error: userError.message });
         }
 
-        // Se non è un manutentore, è un tesserato
         const ruolo = user?.ruolo || 'tesserato';
 
-        // Recupera i comunicati destinati a questo ruolo
         const { data, error } = await supabaseAdmin
             .from('comunicati')
             .select('*')
@@ -92,7 +84,6 @@ router.get('/comunicati', authenticate, async (req, res) => {
             return res.status(400).json({ error: error.message });
         }
 
-        // Recupera i comunicati già letti da questo utente
         const { data: letti, error: lettiError } = await supabaseAdmin
             .from('comunicati_letti')
             .select('comunicato_id')
@@ -103,8 +94,6 @@ router.get('/comunicati', authenticate, async (req, res) => {
         }
 
         const lettiIds = letti.map(l => l.comunicato_id);
-
-        // Aggiungi flag 'letto' a ogni comunicato
         const comunicatiConLetto = data.map(c => ({
             ...c,
             letto: lettiIds.includes(c.id)
@@ -121,12 +110,11 @@ router.get('/comunicati', authenticate, async (req, res) => {
 // ============================================================
 // 3. SEGNA UN COMUNICATO COME LETTO
 // ============================================================
-router.post('/comunicati/:id/lettura', authenticate, async (req, res) => {
+router.post('/:id/lettura', authenticate, async (req, res) => {
     try {
         const comunicatoId = parseInt(req.params.id);
         const userId = req.user.id;
 
-        // Verifica che il comunicato esista
         const { data: comunicato, error: checkError } = await supabaseAdmin
             .from('comunicati')
             .select('id')
@@ -137,7 +125,6 @@ router.post('/comunicati/:id/lettura', authenticate, async (req, res) => {
             return res.status(404).json({ error: 'Comunicato non trovato' });
         }
 
-        // Segna come letto (evita duplicati con UNIQUE)
         const { error } = await supabaseAdmin
             .from('comunicati_letti')
             .insert({
@@ -147,8 +134,7 @@ router.post('/comunicati/:id/lettura', authenticate, async (req, res) => {
             });
 
         if (error) {
-            // Se è un duplicato, va bene
-            if (error.code !== '23505') { // UNIQUE violation
+            if (error.code !== '23505') {
                 return res.status(400).json({ error: error.message });
             }
         }
@@ -164,11 +150,10 @@ router.post('/comunicati/:id/lettura', authenticate, async (req, res) => {
 // ============================================================
 // 4. OTTIENI IL NUMERO DI COMUNICATI NON LETTI
 // ============================================================
-router.get('/comunicati/non-letti', authenticate, async (req, res) => {
+router.get('/non-letti', authenticate, async (req, res) => {
     try {
         const userId = req.user.id;
 
-        // Ottieni il ruolo dell'utente
         const { data: user, error: userError } = await supabaseAdmin
             .from('manutentori')
             .select('ruolo')
@@ -181,7 +166,6 @@ router.get('/comunicati/non-letti', authenticate, async (req, res) => {
 
         const ruolo = user?.ruolo || 'tesserato';
 
-        // Recupera i comunicati non letti per questo ruolo
         const { data: comunicati, error } = await supabaseAdmin
             .from('comunicati')
             .select('id')
@@ -198,7 +182,6 @@ router.get('/comunicati/non-letti', authenticate, async (req, res) => {
             return res.json({ success: true, nonLetti: 0 });
         }
 
-        // Recupera quelli già letti
         const { data: letti, error: lettiError } = await supabaseAdmin
             .from('comunicati_letti')
             .select('comunicato_id')
