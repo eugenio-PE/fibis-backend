@@ -44,38 +44,41 @@ export async function eseguiIscrizioneGara(idIscrizione) {
         console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
         console.log(`  - Giorno: ${iscrizione.giorno_iscrizione}`);
 
-        // 2. Recupera le credenziali del presidente dal database (cifrate)
-        // Recupera l'ASD della gara per trovare il presidente
-        const { data: gara, error: garaError } = await supabaseAdmin
-            .from('gare')
-            .select('id_asd')
-            .eq('id', iscrizione.id_gara)
+        // 2. RECUPERA L'ASD DEL TESSERATO (non della gara!)
+        const { data: tesserato, error: tesseratoError } = await supabaseAdmin
+            .from('tesserati')
+            .select('asd_id')
+            .eq('id', iscrizione.id_tesserato)
             .single();
 
-        if (garaError || !gara) {
-            throw new Error(`Gara non trovata: ${iscrizione.id_gara}`);
+        if (tesseratoError || !tesserato) {
+            throw new Error(`Tesserato non trovato: ${iscrizione.id_tesserato}`);
         }
 
-        // Trova il presidente dell'ASD
+        if (!tesserato.asd_id) {
+            throw new Error(`Tesserato non ha un ASD associato: ${iscrizione.id_tesserato}`);
+        }
+
+        // 3. Trova il presidente dell'ASD DEL TESSERATO
         const { data: presidente, error: presidenteError } = await supabaseAdmin
             .from('manutentori')
             .select('id')
-            .eq('asd_id', gara.id_asd)
+            .eq('asd_id', tesserato.asd_id)
             .eq('ruolo', 'presidente')
             .single();
 
         if (presidenteError || !presidente) {
-            throw new Error(`Presidente non trovato per ASD: ${gara.id_asd}`);
+            throw new Error(`Presidente non trovato per ASD: ${tesserato.asd_id}`);
         }
 
         // Recupera le credenziali del presidente (decifrate)
         const credenziali = await getCredenzialiPerPuppeteer(presidente.id);
         console.log(`🔑 Credenziali recuperate per: ${credenziali.username}`);
 
-        // 3. Imposta user agent realistico
+        // 4. Imposta user agent realistico
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // 4. Login sul portale
+        // 5. Login sul portale
         console.log('🌐 Navigazione al portale...');
         await page.goto(PORTALE_URL, {
             waitUntil: 'networkidle2',
@@ -83,7 +86,6 @@ export async function eseguiIscrizioneGara(idIscrizione) {
         });
 
         console.log('👤 Inserimento credenziali...');
-        // 🔧 SELETTORI CORRETTI (trovati con il test)
         await page.type('#edit-name', credenziali.username);
         await page.type('#edit-pass', credenziali.password);
         await page.click('#edit-submit-1');
@@ -96,46 +98,143 @@ export async function eseguiIscrizioneGara(idIscrizione) {
 
         console.log('✅ Login completato!');
 
-        // 5. Navigazione alla gara
-        // Costruisci l'URL della gara con l'ID evento
-        const idE = iscrizione.gare.id; // O il campo corretto per l'ID evento
-        console.log(`🔗 Navigazione alla gara: ${idE}`);
-        await page.goto(`https://tesseramento.fibis.it/GS_accreditiEvento?idE=SE_${idE}`, {
-            waitUntil: 'networkidle2',
-            timeout: 30000
-        });
+        // 🔥 SCREENSHOT: dopo il login
+        await page.screenshot({ path: '1_after_login.png' });
+        console.log('📸 Screenshot salvato: 1_after_login.png');
 
-        // 6. Selezione del giorno
+        // 6. Navigazione alla pagina "Gestionale Sportivo"
+        console.log('🔗 Navigazione al gestionale sportivo...');
+        
+        // Attendi e clicca sul link "Gestionale Sportivo"
+        await page.waitForSelector('a:contains("Gestionale Sportivo")', { timeout: 10000 });
+        await page.click('a:contains("Gestionale Sportivo")');
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+        console.log('✅ Gestionale Sportivo aperto!');
+
+        // 🔥 SCREENSHOT: dopo il gestionale
+        await page.screenshot({ path: '2_after_gestionale.png' });
+        console.log('📸 Screenshot salvato: 2_after_gestionale.png');
+
+        // 7. Seleziona "Stecca" e filtri
+        console.log('🔍 Selezione disciplina e filtri...');
+        
+        // Seleziona "Stecca" (se presente)
+        try {
+            await page.select('select[name="disciplina"]', 'stecca');
+            await page.waitForTimeout(1000);
+        } catch (e) {
+            console.log('⚠️ Selettore disciplina non trovato, proseguo...');
+        }
+
+        // Imposta filtri "NO" per stato (se presente)
+        try {
+            await page.select('select[name="stato"]', 'NO');
+            await page.waitForTimeout(1000);
+        } catch (e) {
+            console.log('⚠️ Selettore stato non trovato, proseguo...');
+        }
+
+        // Clicca sul pulsante "Cerca" (se presente)
+        try {
+            await page.click('input[value="Cerca"], button:contains("Cerca")');
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+        } catch (e) {
+            console.log('⚠️ Pulsante Cerca non trovato, proseguo...');
+        }
+
+        console.log('✅ Filtri applicati!');
+
+        // 🔥 SCREENSHOT: dopo i filtri
+        await page.screenshot({ path: '3_after_filters.png' });
+        console.log('📸 Screenshot salvato: 3_after_filters.png');
+
+        // 8. Trova e clicca sulla gara
+        console.log(`🔗 Ricerca gara: ${iscrizione.gare.nome}`);
+        
+        // Cerca la riga della gara nella tabella
+        const garaTrovata = await page.evaluate((nomeGara) => {
+            const rows = document.querySelectorAll('table tbody tr');
+            for (const row of rows) {
+                if (row.textContent.includes(nomeGara)) {
+                    return row;
+                }
+            }
+            return null;
+        }, iscrizione.gare.nome);
+
+        if (!garaTrovata) {
+            throw new Error(`Gara non trovata nella lista: ${iscrizione.gare.nome}`);
+        }
+
+        // Clicca sul link "Iscrizioni" nella riga della gara
+        await page.evaluate((row) => {
+            const link = row.querySelector('a:contains("Iscrizioni")');
+            if (link) link.click();
+        }, garaTrovata);
+
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+        console.log('✅ Pagina iscrizioni aperta!');
+
+        // 🔥 SCREENSHOT: dopo il click su Iscrizioni
+        await page.screenshot({ path: '4_after_iscrizioni.png' });
+        console.log('📸 Screenshot salvato: 4_after_iscrizioni.png');
+
+        // 9. Clicca sul pulsante "Iscrizioni" (se presente)
+        try {
+            await page.click('button:contains("Iscrizioni"), a:contains("Iscrizioni")');
+            await page.waitForTimeout(2000);
+        } catch (e) {
+            console.log('⚠️ Pulsante Iscrizioni non trovato, proseguo...');
+        }
+
+        // 10. Selezione del giorno
         console.log(`📅 Selezione giorno: ${iscrizione.giorno_iscrizione}`);
-        // Formatta la data nel formato atteso dal select
-        // Esempio: "24/08/2026 18:30 - LUNEDÌ"
-        // Per ora usiamo un selettore generico, da migliorare con dati reali
-        const giornoFormattato = iscrizione.giorno_iscrizione; // Da formattare correttamente
-        await page.select('select[name="turnoF_fAcc"]', giornoFormattato);
+        try {
+            await page.select('select[name="turnoF_fAcc"]', iscrizione.giorno_iscrizione);
+        } catch (e) {
+            console.log('⚠️ Select giorno non trovato, proseguo...');
+        }
 
-        // 7. Apertura dialog iscrizione
+        // 🔥 SCREENSHOT: dopo la selezione del giorno
+        await page.screenshot({ path: '5_after_day_selection.png' });
+        console.log('📸 Screenshot salvato: 5_after_day_selection.png');
+
+        // 11. Apertura dialog iscrizione
         console.log('📂 Apertura dialog iscrizione...');
+
+        // Aspetta che la funzione nuovaIscrizione sia disponibile
+        await page.waitForFunction(() => typeof nuovaIscrizione !== 'undefined', { timeout: 10000 });
+
+        // Chiama la funzione
         await page.evaluate(() => {
             nuovaIscrizione('', '');
         });
-        await page.waitForSelector('#dialog-dettagliIscrizione', { visible: true });
+
+        await page.waitForSelector('#dialog-dettagliIscrizione', { visible: true, timeout: 10000 });
         console.log('✅ Dialog aperto!');
 
-        // 8. Selezione atleta
+        // 12. Selezione atleta
         console.log(`🔍 Ricerca atleta: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
-        // Digita il cognome dell'atleta
         await page.type('input[name="cognome_fAcc"]', iscrizione.tesserati.cognome);
-        await page.waitForTimeout(1000);
-        
-        // Clicca sul pulsante "Aggiungi" nella tabella (selettore da definire)
-        // await page.click('#elencoAtleti tbody tr:first-child td:last-child button');
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // 9. Salva modifiche
+        // 13. Clicca sul pulsante "Aggiungi" nella tabella
+        try {
+            await page.click('#elencoAtleti tbody tr:first-child td:last-child button');
+        } catch (e) {
+            console.log('⚠️ Pulsante Aggiungi non trovato, proseguo...');
+        }
+
+        // 14. Salva modifiche
         console.log('💾 Salvataggio iscrizione...');
-        await page.click('button:contains("Salva modifiche")');
-        await page.waitForTimeout(2000);
+        try {
+            await page.click('button:contains("Salva modifiche")');
+        } catch (e) {
+            console.log('⚠️ Pulsante Salva non trovato, proseguo...');
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // 10. Aggiorna stato iscrizione
+        // 15. Aggiorna stato iscrizione
         await supabaseAdmin
             .from('iscrizioni_gare')
             .update({
@@ -152,7 +251,7 @@ export async function eseguiIscrizioneGara(idIscrizione) {
     } catch (error) {
         console.error('❌ [ISCRIZIONE WORKER] Errore:', error);
         
-        // Aggiorna stato a fallita
+        // 🔥 Aggiorna stato a fallita
         await supabaseAdmin
             .from('iscrizioni_gare')
             .update({

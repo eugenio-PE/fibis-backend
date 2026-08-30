@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { scrapeRanking } from './rankingScraper.js';
+import { scrapeGare } from './gareScraper.js';
 import { checkAndSendNotifications } from './notificationWorker.js';
 
 console.log('🕐 [CRON] Avvio Cron Job...');
@@ -18,9 +19,22 @@ cron.schedule('0 3 * * *', async () => {
 });
 
 // ============================================================
-// JOB 2: Notifiche push - 2 volte al giorno (8:00 e 20:00)
+// JOB 2: Scraping Gare - Ogni notte alle 4:00 AM
 // ============================================================
-cron.schedule('0 8,20 * * *', async () => {
+cron.schedule('0 4 * * *', async () => {
+    console.log('🔄 [CRON] Esecuzione job scraping gare...');
+    try {
+        await scrapeGare();
+        console.log('✅ [CRON] Job Scraping Gare completato con successo');
+    } catch (error) {
+        console.error('❌ [CRON] Errore nel job Scraping Gare:', error);
+    }
+});
+
+// ============================================================
+// JOB 3: Notifiche push - 2 volte al giorno (8:00 e 15:00)
+// ============================================================
+cron.schedule('0 8,15 * * *', async () => {
     console.log('📢 [CRON] Esecuzione job notifiche push...');
     try {
         await checkAndSendNotifications();
@@ -32,7 +46,8 @@ cron.schedule('0 8,20 * * *', async () => {
 
 console.log('✅ [CRON] Cron Job avviato:');
 console.log('   📊 Ranking → Ogni notte alle 3:00');
-console.log('   📢 Notifiche → Ogni giorno alle 8:00 e 20:00');
+console.log('   🏆 Gare → Ogni notte alle 4:00');
+console.log('   📢 Notifiche → Ogni giorno alle 8:00 e 15:00');
 
 // Mantieni il processo in esecuzione
 process.stdin.resume();

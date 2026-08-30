@@ -10,6 +10,8 @@ import tesseratiRoutes from './src/routes/tesseratiRoutes.js';
 import rankingRoutes from './src/routes/rankingRoutes.js';
 import credenzialiRoutes from './src/routes/credenzialiRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js'; 
+// ✅ AVVIA IL CRON JOB ALL'AVVIO DEL SERVER
+import './src/workers/cron.js';
 
 dotenv.config();
 

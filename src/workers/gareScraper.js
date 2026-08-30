@@ -145,6 +145,7 @@ async function estraiGareDaPagina(page, tipologiaForzata) {
             const mese = item.querySelector('.date_cont .month')?.textContent?.trim() || '';
             const luogo = item.querySelector('.loc')?.textContent?.trim() || '';
             const iscrizioni = item.querySelector('.iscrizioni')?.textContent?.trim() || '';
+            const locandinaLink = item.querySelector('.locandina')?.getAttribute('href') || '';
             
             let tipologia = tipologiaForzata || 'Istituzionale';
             if (!tipologiaForzata) {
@@ -164,6 +165,7 @@ async function estraiGareDaPagina(page, tipologiaForzata) {
                 iscrizioni,
                 tipologia,
                 categoria,
+                locandinaLink,
             };
         });
     }, tipologiaForzata);
@@ -352,23 +354,24 @@ async function saveGare(gare, regioneDefault) {
             }
 
             const { error } = await supabaseAdmin
-                .from('gare')
-                .insert({
-                    nome: gara.titolo,
-                    data_gara: dataGaraFinale,
-                    id_asd: null,
-                    id_direttore: null,
-                    nulla_osta: 'N/A',
-                    tipologia: gara.tipologia ? gara.tipologia.toLowerCase() : 'istituzionale',
-                    categoria: gara.categoria,
-                    regione: regioneDefault,
-                    stato: 'programmata',
-                    inserito_da: null,
-                    inserito_il: new Date().toISOString(),
-                    data_inizio_iscrizioni: iscrizioni.inizio,
-                    data_fine_iscrizioni: iscrizioni.fine,
-                    note: `Luogo: ${gara.luogo}`,
-                });
+    .from('gare')
+    .insert({
+        nome: gara.titolo,
+        data_gara: dataGaraFinale,
+        id_asd: null,
+        id_direttore: null,
+        nulla_osta: 'N/A',
+        tipologia: gara.tipologia ? gara.tipologia.toLowerCase() : 'istituzionale',
+        categoria: gara.categoria,
+        regione: regioneDefault,
+        stato: 'programmata',
+        inserito_da: null,
+        inserito_il: new Date().toISOString(),
+        data_inizio_iscrizioni: iscrizioni.inizio,
+        data_fine_iscrizioni: iscrizioni.fine,
+        note: `Luogo: ${gara.luogo}`,
+        locandina_url: gara.locandinaLink ? `https://www.fibis.it${gara.locandinaLink}` : null,
+    });
 
             if (error) {
                 console.error(`    ❌ Errore: ${gara.titolo}`, error.message);

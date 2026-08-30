@@ -1,6 +1,5 @@
-// src/workers/notificationWorker.js
 import { supabaseAdmin } from '../config/supabase.js';
-import { sendPushNotificationMultiple, testFirebaseConnection } from '../services/firebaseService.js';
+import { sendPushNotificationMultiple } from '../services/firebaseService.js';
 
 // ============================================================
 // FUNZIONE PRINCIPALE - CONTROLLO E INVIO NOTIFICHE
@@ -10,13 +9,6 @@ export async function checkAndSendNotifications() {
     const startTime = Date.now();
 
     try {
-        // Test connessione Firebase
-        const firebaseOk = await testFirebaseConnection();
-        if (!firebaseOk) {
-            console.log('❌ Firebase non disponibile, interrompo');
-            return;
-        }
-
         const oggi = new Date().toISOString().split('T')[0];
         const domani = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
@@ -52,18 +44,32 @@ export async function checkAndSendNotifications() {
             let messaggio = '';
 
             if (gara.data_inizio_iscrizioni === domani) {
-                tipo = 'apertura_domani';
-                titolo = `🔜 ${gara.nome}`;
-                messaggio = `Le iscrizioni per "${gara.nome}" aprono DOMANI! Preparati!`;
-            } else if (gara.data_inizio_iscrizioni === oggi) {
-                tipo = 'apertura_oggi';
-                titolo = `📢 ${gara.nome}`;
-                messaggio = `Le iscrizioni per "${gara.nome}" sono APERTE! Iscriviti ora!`;
-            } else if (gara.data_fine_iscrizioni === oggi) {
-                tipo = 'ultimo_giorno';
-                titolo = `⏳ ${gara.nome}`;
-                messaggio = `⚠️ ULTIMO GIORNO per iscriverti a "${gara.nome}"!`;
-            }
+    tipo = 'apertura_domani';
+    titolo = `🔜 ${gara.nome}`;
+    messaggio = `Le iscrizioni per "${gara.nome}" aprono DOMANI! Preparati!`;
+    
+} else if (gara.data_inizio_iscrizioni === oggi) {
+    // ✅ CONTROLLO ORARIO: distingue tra promemoria (8:00) e apertura effettiva (15:00)
+    const now = new Date();
+    const hour = now.getHours();
+    
+    if (hour < 15) {
+        // Prima delle 15:00 → Notifica di promemoria
+        tipo = 'apertura_oggi_promemoria';
+        titolo = `⏰ ${gara.nome}`;
+        messaggio = `Le iscrizioni per "${gara.nome}" aprono OGGI ALLE 15:00! Preparati!`;
+    } else {
+        // Dopo le 15:00 → Notifica di apertura effettiva
+        tipo = 'apertura_oggi';
+        titolo = `📢 ${gara.nome}`;
+        messaggio = `Le iscrizioni per "${gara.nome}" sono APERTE! Iscriviti ora!`;
+    }
+    
+} else if (gara.data_fine_iscrizioni === oggi) {
+    tipo = 'ultimo_giorno';
+    titolo = `⏳ ${gara.nome}`;
+    messaggio = `⚠️ ULTIMO GIORNO per iscriverti a "${gara.nome}"!`;
+}
 
             if (!tipo) continue;
 
@@ -134,14 +140,36 @@ export async function checkAndSendNotifications() {
  */
 async function getTesseratiPerGara(gara) {
     try {
+        // 1. Prendi TUTTI i tesserati (senza filtri iniziali)
         let query = supabaseAdmin
             .from('tesserati')
-            .select('id, nome, cognome, regione, categoria_ranking')
-            .eq('regione', gara.regione);
+            .select('id, nome, cognome, regione, categoria_ranking');
 
-        // Filtra per categoria se specificata
-        if (gara.categoria) {
-            query = query.eq('categoria_ranking', gara.categoria);
+        // 2. Applica i filtri in base alla tipologia
+        const tipologia = gara.tipologia?.toLowerCase();
+
+        // Fibis Challenge → sempre visibile a tutti
+        if (tipologia === 'fibis challenge' || tipologia === 'internazionale') {
+            // Nessun filtro
+        }
+        // Istituzionale → solo categorie di base + regione
+        else if (tipologia === 'istituzionale') {
+            const categorieBase = ['terza', 'seconda', 'prima'];
+            query = query
+                .in('categoria_ranking', categorieBase)
+                .eq('regione', gara.regione);
+        }
+        // Libera → sempre visibile (nessun filtro regione)
+        else if (tipologia === 'libera') {
+            // Se la gara ha una categoria specifica, filtra per quella
+            if (gara.categoria) {
+                query = query.eq('categoria_ranking', gara.categoria);
+            }
+            // Altrimenti, nessun filtro
+        }
+        // Riservata → solo se regione corrisponde
+        else if (tipologia === 'riservata') {
+            query = query.eq('regione', gara.regione);
         }
 
         const { data, error } = await query;
