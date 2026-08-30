@@ -17,6 +17,7 @@ import credenzialiRoutes from './src/routes/credenzialiRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
 // ✅ AVVIA IL CRON JOB ALL'AVVIO DEL SERVER
 import './src/workers/cron.js';
+import comunicatiRoutes from './src/routes/comunicatiRoutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,6 +51,7 @@ app.use('/api/tesserati', tesseratiRoutes);
 app.use('/api/ranking', rankingRoutes);
 app.use('/api/presidenti', credenzialiRoutes);
 app.use('/api/notifiche', notificationRoutes);
+app.use('/api/comunicati', comunicatiRoutes);
 
 // Health check (sempre accessibile)
 app.get('/api/health', (req, res) => {
