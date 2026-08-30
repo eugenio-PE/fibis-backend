@@ -5,6 +5,14 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// ✅ MAPPA RUOLI (singolare → plurale)
+const ruoliMappa = {
+    'tesserato': 'tesserati',
+    'presidente': 'presidenti',
+    'direttore': 'direttori',
+    'manutentore': 'manutentori',
+};
+
 // ============================================================
 // 1. CREA UN NUOVO COMUNICATO (SOLO ADMIN)
 // ============================================================
@@ -72,11 +80,15 @@ router.get('/', authenticate, async (req, res) => {
         }
 
         const ruolo = user?.ruolo || 'tesserato';
+        // ✅ NORMALIZZA IL RUOLO (singolare → plurale)
+        const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
+
+        console.log(`🔍 Ruolo: ${ruolo} → normalizzato: ${ruoloNormalizzato}`);
 
         const { data, error } = await supabaseAdmin
             .from('comunicati')
             .select('*')
-            .contains('destinatari', [ruolo])
+            .contains('destinatari', [ruoloNormalizzato])
             .eq('pubblicato', true)
             .order('data_pubblicazione', { ascending: false });
 
@@ -165,11 +177,13 @@ router.get('/non-letti', authenticate, async (req, res) => {
         }
 
         const ruolo = user?.ruolo || 'tesserato';
+        // ✅ NORMALIZZA IL RUOLO (singolare → plurale)
+        const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
 
         const { data: comunicati, error } = await supabaseAdmin
             .from('comunicati')
             .select('id')
-            .contains('destinatari', [ruolo])
+            .contains('destinatari', [ruoloNormalizzato])
             .eq('pubblicato', true);
 
         if (error) {
