@@ -1,13 +1,6 @@
 // src/services/firebaseService.js
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 let firebaseApp = null;
 let messaging = null;
@@ -16,22 +9,35 @@ function initFirebase() {
     if (firebaseApp) return firebaseApp;
 
     try {
-        const jsonPath = resolve(__dirname, '../../credentials/firebase.json');
-        console.log('🔍 Cerco file in:', jsonPath);
-        
-        const serviceAccount = JSON.parse(readFileSync(jsonPath, 'utf8'));
-        console.log('✅ File JSON letto. Project ID:', serviceAccount.project_id);
+        // 🔥 USA LE VARIABILI D'AMBIENTE (Railway)
+        const projectId = process.env.FIREBASE_PROJECT_ID;
+        const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+        const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+        if (!projectId || !clientEmail || !privateKey) {
+            console.error('❌ Variabili d\'ambiente Firebase mancanti!');
+            console.error('   FIREBASE_PROJECT_ID:', projectId ? '✅' : '❌');
+            console.error('   FIREBASE_CLIENT_EMAIL:', clientEmail ? '✅' : '❌');
+            console.error('   FIREBASE_PRIVATE_KEY:', privateKey ? '✅' : '❌');
+            return null;
+        }
+
+        console.log('✅ Firebase inizializzato con variabili d\'ambiente');
+        console.log('   Project ID:', projectId);
 
         firebaseApp = initializeApp({
-            credential: cert(serviceAccount),
+            credential: cert({
+                projectId,
+                clientEmail,
+                privateKey,
+            }),
         });
 
         messaging = getMessaging(firebaseApp);
-        console.log('✅ Firebase Admin inizializzato correttamente (con named imports)');
+        console.log('✅ Firebase Admin inizializzato correttamente');
         return firebaseApp;
     } catch (error) {
         console.error('❌ Errore inizializzazione Firebase:', error.message);
-        console.error('📚 Dettaglio:', error);
         return null;
     }
 }
@@ -57,7 +63,6 @@ export async function sendPushNotification(fcmToken, title, body, data = null) {
         return response;
     } catch (error) {
         console.error('❌ Errore invio notifica:', error.message);
-        console.error('📚 Dettaglio errore:', error);
         return null;
     }
 }
