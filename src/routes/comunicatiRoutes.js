@@ -63,7 +63,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 2. OTTIENI I COMUNICATI PER UN UTENTE
+// 2. OTTIENI I COMUNICATI PER UN UTENTE (USA RPC)
 // ============================================================
 router.get('/', authenticate, async (req, res) => {
     try {
@@ -85,18 +85,16 @@ router.get('/', authenticate, async (req, res) => {
 
         console.log(`🔍 Ruolo: ${ruolo} → normalizzato: ${ruoloNormalizzato}`);
 
-        // ✅ USA .overlaps() INVECE DI .contains()
+        // ✅ USA RPC PER IL FILTRO (funzione creata in Supabase)
         const { data, error } = await supabaseAdmin
-            .from('comunicati')
-            .select('*')
-            .overlaps('destinatari', [ruoloNormalizzato])
-            .eq('pubblicato', true)
-            .order('data_pubblicazione', { ascending: false });
+            .rpc('get_comunicati_per_ruolo', { ruolo_input: ruoloNormalizzato });
 
         if (error) {
+            console.error('❌ Errore RPC:', error);
             return res.status(400).json({ error: error.message });
         }
 
+        // Recupera i comunicati già letti da questo utente
         const { data: letti, error: lettiError } = await supabaseAdmin
             .from('comunicati_letti')
             .select('comunicato_id')
@@ -161,7 +159,7 @@ router.post('/:id/lettura', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 4. OTTIENI IL NUMERO DI COMUNICATI NON LETTI
+// 4. OTTIENI IL NUMERO DI COMUNICATI NON LETTI (USA RPC)
 // ============================================================
 router.get('/non-letti', authenticate, async (req, res) => {
     try {
@@ -181,14 +179,12 @@ router.get('/non-letti', authenticate, async (req, res) => {
         // ✅ NORMALIZZA IL RUOLO (singolare → plurale)
         const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
 
-        // ✅ USA .overlaps() INVECE DI .contains()
+        // ✅ USA RPC PER IL FILTRO
         const { data: comunicati, error } = await supabaseAdmin
-            .from('comunicati')
-            .select('id')
-            .overlaps('destinatari', [ruoloNormalizzato])
-            .eq('pubblicato', true);
+            .rpc('get_comunicati_per_ruolo', { ruolo_input: ruoloNormalizzato });
 
         if (error) {
+            console.error('❌ Errore RPC (non-letti):', error);
             return res.status(400).json({ error: error.message });
         }
 
