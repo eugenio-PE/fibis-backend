@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import http from 'http'; // ← NUOVO
 
 // ✅ CARICA LE VARIABILI D'AMBIENTE SUBITO
 dotenv.config();
@@ -15,9 +16,12 @@ import tesseratiRoutes from './src/routes/tesseratiRoutes.js';
 import rankingRoutes from './src/routes/rankingRoutes.js';
 import credenzialiRoutes from './src/routes/credenzialiRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
-// ✅ AVVIA IL CRON JOB ALL'AVVIO DEL SERVER
 import './src/workers/cron.js';
 import comunicatiRoutes from './src/routes/comunicatiRoutes.js';
+import iscrizioniRoutes from './src/routes/iscrizioniRoutes.js';
+
+// ✅ IMPORTA IL WEBSOCKET SERVICE
+import { initWebSocketServer } from './src/services/websocketService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,8 +31,8 @@ app.use(cors({
   origin: [
     'https://fibis-admin.vercel.app',
     'https://fibis-admin-7f3a3zjdm-fibis.vercel.app',
-      'https://fibis-admin-hoqsnpn2p-fibis.vercel.app',  
-        'https://fibis-admin-qurc83xim-fibis.vercel.app',
+    'https://fibis-admin-hoqsnpn2p-fibis.vercel.app',
+    'https://fibis-admin-qurc83xim-fibis.vercel.app',
     'https://fibismanutentori.vercel.app',
     'https://fibisdirettori.vercel.app',
     'https://fibispresidenti.vercel.app',
@@ -48,13 +52,13 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api', interventoRoutes);
 app.use('/api', adminRoutes);
-app.use('/api', gareRoutes);          // ← gareRoutes (contiene /gare, /gare-admin, /gare/:id, ecc.)
+app.use('/api', gareRoutes);
 app.use('/api/tesserati', tesseratiRoutes);
 app.use('/api/ranking', rankingRoutes);
 app.use('/api/presidenti', credenzialiRoutes);
 app.use('/api/notifiche', notificationRoutes);
 app.use('/api/comunicati', comunicatiRoutes);
-
+app.use('/api/iscrizioni', iscrizioniRoutes);
 // Health check (sempre accessibile)
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -64,7 +68,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ROTTA DI FALLBACK per test (se le route non funzionano)
+// ROTTA DI FALLBACK per test
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -94,7 +98,13 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server avviato su http://localhost:3000`);
-  console.log(`📊 Health check: http://localhost:3000/api/health`);
+// ============================================================
+// ✅ CREA IL SERVER HTTP E AVVIA WEBSOCKET
+// ============================================================
+const server = http.createServer(app);
+initWebSocketServer(server);
+
+server.listen(PORT, () => {
+  console.log(`🚀 Server avviato su http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket Server attivo su /ws`);
 });
