@@ -38,7 +38,21 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         if (iscrizioneError || !iscrizione) {
             throw new Error(`Iscrizione non trovata: ${idIscrizione}`);
         }
-
+    // ✅ AGGIUNGI: se userIdFromClient è passato, aggiorna user_id
+    if (userIdFromClient && !iscrizione.user_id) {
+        await supabaseAdmin
+            .from('iscrizioni_gare')
+            .update({ user_id: userIdFromClient })
+            .eq('id', idIscrizione);
+        console.log(`✅ user_id aggiornato: ${userIdFromClient}`);
+        // Ricarica l'iscrizione per avere il nuovo user_id
+        const { data: updatedIscrizione } = await supabaseAdmin
+            .from('iscrizioni_gare')
+            .select(`*, gare (*), tesserati (*)`)
+            .eq('id', idIscrizione)
+            .single();
+        Object.assign(iscrizione, updatedIscrizione);
+    }
         console.log(`📋 Iscrizione: ${iscrizione.id}`);
         console.log(`  - Gara: ${iscrizione.gare.nome}`);
         console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
