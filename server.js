@@ -28,6 +28,7 @@ app.use(cors({
     'https://fibis-admin.vercel.app',
     'https://fibis-admin-7f3a3zjdm-fibis.vercel.app',
       'https://fibis-admin-hoqsnpn2p-fibis.vercel.app',  
+        'https://fibis-admin-qurc83xim-fibis.vercel.app',
     'https://fibismanutentori.vercel.app',
     'https://fibisdirettori.vercel.app',
     'https://fibispresidenti.vercel.app',
