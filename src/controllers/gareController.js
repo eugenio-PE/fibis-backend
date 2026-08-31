@@ -205,14 +205,20 @@ export const iscrivitiGara = async (req, res) => {
         }
 
         // 5. Crea l'iscrizione nel database
+        const insertData = {
+            id_gara: parseInt(id),
+            id_tesserato: parseInt(id_tesserato),
+            stato: 'in_attesa'
+        };
+
+        // ✅ Aggiungi giorno_iscrizione SOLO SE fornito
+        if (giorno_iscrizione) {
+            insertData.giorno_iscrizione = giorno_iscrizione;
+        }
+
         const { data: iscrizione, error: iscrizioneError } = await supabaseAdmin
             .from('iscrizioni_gare')
-            .insert({
-                id_gara: parseInt(id),
-                id_tesserato: parseInt(id_tesserato),
-                giorno_iscrizione: giorno_iscrizione,
-                stato: 'in_attesa'
-            })
+            .insert(insertData)
             .select()
             .single();
 
@@ -238,6 +244,7 @@ export const iscrivitiGara = async (req, res) => {
         res.status(201).json({
             success: true,
             message: 'Iscrizione avviata',
+            id: iscrizione.id,
             data: {
                 id_iscrizione: iscrizione.id,
                 stato: iscrizione.stato,
@@ -251,6 +258,7 @@ export const iscrivitiGara = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
 // ============================================================
 // PUT /api/gare/:id
 // Aggiorna una gara esistente (solo admin)
