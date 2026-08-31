@@ -21,7 +21,13 @@ export const getTesserati = async (req, res) => {
         if (stato) query = query.eq('stato', stato);
         if (stagione) query = query.eq('stagione', stagione);
         if (search) {
-            query = query.or(`nome.ilike.%${search}%,cognome.ilike.%${search}%,email.ilike.%${search}%,matricola::text.ilike.%${search}%,codice_tessera.ilike.%${search}%`);
+            // ✅ SINTASSI CORRETTA (senza matricola)
+            query = query.or(
+                `nome.ilike.%${search}%,` +
+                `cognome.ilike.%${search}%,` +
+                `email.ilike.%${search}%,` +
+                `codice_tessera.ilike.%${search}%`
+            );
         }
 
         const { data, error } = await query.order('cognome', { ascending: true });
