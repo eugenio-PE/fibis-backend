@@ -85,10 +85,11 @@ router.get('/', authenticate, async (req, res) => {
 
         console.log(`🔍 Ruolo: ${ruolo} → normalizzato: ${ruoloNormalizzato}`);
 
+        // ✅ USA .overlaps() INVECE DI .contains()
         const { data, error } = await supabaseAdmin
             .from('comunicati')
             .select('*')
-            .contains('destinatari', [ruoloNormalizzato])
+            .overlaps('destinatari', [ruoloNormalizzato])
             .eq('pubblicato', true)
             .order('data_pubblicazione', { ascending: false });
 
@@ -180,10 +181,11 @@ router.get('/non-letti', authenticate, async (req, res) => {
         // ✅ NORMALIZZA IL RUOLO (singolare → plurale)
         const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
 
+        // ✅ USA .overlaps() INVECE DI .contains()
         const { data: comunicati, error } = await supabaseAdmin
             .from('comunicati')
             .select('id')
-            .contains('destinatari', [ruoloNormalizzato])
+            .overlaps('destinatari', [ruoloNormalizzato])
             .eq('pubblicato', true);
 
         if (error) {
