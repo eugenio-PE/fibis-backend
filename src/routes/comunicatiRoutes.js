@@ -80,18 +80,34 @@ router.get('/', authenticate, async (req, res) => {
         }
 
         const ruolo = user?.ruolo || 'tesserato';
-        // ✅ NORMALIZZA IL RUOLO (singolare → plurale)
-        const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
 
-        console.log(`🔍 Ruolo: ${ruolo} → normalizzato: ${ruoloNormalizzato}`);
+        let comunicati;
 
-        // ✅ USA RPC PER IL FILTRO (funzione creata in Supabase)
-        const { data, error } = await supabaseAdmin
-            .rpc('get_comunicati_per_ruolo', { ruolo_input: ruoloNormalizzato });
+        // ✅ SE ADMIN → PRENDE TUTTI
+        if (ruolo === 'admin') {
+            const { data, error } = await supabaseAdmin
+                .from('comunicati')
+                .select('*')
+                .eq('pubblicato', true)
+                .order('data_pubblicazione', { ascending: false });
 
-        if (error) {
-            console.error('❌ Errore RPC:', error);
-            return res.status(400).json({ error: error.message });
+            if (error) {
+                return res.status(400).json({ error: error.message });
+            }
+            comunicati = data;
+        } else {
+            // ✅ PER GLI ALTRI → FILTRA PER RUOLO
+            const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
+            console.log(`🔍 Ruolo: ${ruolo} → normalizzato: ${ruoloNormalizzato}`);
+
+            const { data, error } = await supabaseAdmin
+                .rpc('get_comunicati_per_ruolo', { ruolo_input: ruoloNormalizzato });
+
+            if (error) {
+                console.error('❌ Errore RPC:', error);
+                return res.status(400).json({ error: error.message });
+            }
+            comunicati = data;
         }
 
         // Recupera i comunicati già letti da questo utente
@@ -105,7 +121,7 @@ router.get('/', authenticate, async (req, res) => {
         }
 
         const lettiIds = letti.map(l => l.comunicato_id);
-        const comunicatiConLetto = data.map(c => ({
+        const comunicatiConLetto = comunicati.map(c => ({
             ...c,
             letto: lettiIds.includes(c.id)
         }));
