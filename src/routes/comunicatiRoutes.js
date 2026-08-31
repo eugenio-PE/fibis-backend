@@ -63,7 +63,44 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 2. OTTIENI I COMUNICATI PER UN UTENTE (USA RPC)
+// 2. ELIMINA UN COMUNICATO (SOLO ADMIN)
+// ============================================================
+router.delete('/:id', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const comunicatoId = parseInt(req.params.id);
+
+        // Verifica che sia admin
+        const { data: user, error: userError } = await supabaseAdmin
+            .from('manutentori')
+            .select('ruolo')
+            .eq('user_id', userId)
+            .single();
+
+        if (userError || user?.ruolo !== 'admin') {
+            return res.status(403).json({ error: 'Non autorizzato' });
+        }
+
+        // Elimina il comunicato
+        const { error } = await supabaseAdmin
+            .from('comunicati')
+            .delete()
+            .eq('id', comunicatoId);
+
+        if (error) {
+            return res.status(400).json({ error: error.message });
+        }
+
+        res.json({ success: true, message: 'Comunicato eliminato' });
+
+    } catch (error) {
+        console.error('❌ Errore eliminazione comunicato:', error);
+        res.status(500).json({ error: 'Errore interno del server' });
+    }
+});
+
+// ============================================================
+// 3. OTTIENI I COMUNICATI PER UN UTENTE (USA RPC)
 // ============================================================
 router.get('/', authenticate, async (req, res) => {
     try {
@@ -110,6 +147,21 @@ router.get('/', authenticate, async (req, res) => {
             comunicati = data;
         }
 
+        // ✅ CONTA LE LETTURE PER OGNI COMUNICATO
+        const comunicatiConConteggio = await Promise.all(comunicati.map(async (c) => {
+            const { count, error } = await supabaseAdmin
+                .from('comunicati_letti')
+                .select('*', { count: 'exact', head: true })
+                .eq('comunicato_id', c.id);
+
+            if (error) {
+                console.error('❌ Errore conteggio letture:', error);
+                return { ...c, letti_count: 0 };
+            }
+
+            return { ...c, letti_count: count || 0 };
+        }));
+
         // Recupera i comunicati già letti da questo utente
         const { data: letti, error: lettiError } = await supabaseAdmin
             .from('comunicati_letti')
@@ -121,7 +173,7 @@ router.get('/', authenticate, async (req, res) => {
         }
 
         const lettiIds = letti.map(l => l.comunicato_id);
-        const comunicatiConLetto = comunicati.map(c => ({
+        const comunicatiConLetto = comunicatiConConteggio.map(c => ({
             ...c,
             letto: lettiIds.includes(c.id)
         }));
@@ -135,7 +187,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 3. SEGNA UN COMUNICATO COME LETTO
+// 4. SEGNA UN COMUNICATO COME LETTO
 // ============================================================
 router.post('/:id/lettura', authenticate, async (req, res) => {
     try {
@@ -175,7 +227,7 @@ router.post('/:id/lettura', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 4. OTTIENI IL NUMERO DI COMUNICATI NON LETTI (USA RPC)
+// 5. OTTIENI IL NUMERO DI COMUNICATI NON LETTI (USA RPC)
 // ============================================================
 router.get('/non-letti', authenticate, async (req, res) => {
     try {
