@@ -399,26 +399,93 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             console.log('🐛 [DEBUG] ✅ Iscrizioni APERTE!');
             console.log('✅ Iscrizioni APERTE! Procedo...');
 
-            // Clicca per espandere la sezione
-            console.log('🐛 [DEBUG] Espando la sezione...');
-            await page.evaluate(() => {
-                const header = document.querySelector('h3.ui-accordion-header');
-                if (header) {
-                    header.click();
-                    console.log('🐛 [DEBUG] ✅ Click su header eseguito!');
-                } else {
-                    console.log('🐛 [DEBUG] ❌ Header non trovato!');
+            // ============================================================
+            // 8.5 ESPANDI LA SEZIONE "ISCRIZIONI GARA"
+            // ============================================================
+            console.log('🐛 [DEBUG] Espando la sezione "Iscrizioni Gara"...');
+
+            // Recupera userId per eventuali messaggi
+            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+            let selectVisibile = false;
+
+            try {
+                // Verifica se la sezione esiste
+                const sezioneTrovata = await page.evaluate(() => {
+                    const accordionI = document.querySelector('#accordion_I');
+                    return !!accordionI;
+                });
+
+                if (!sezioneTrovata) {
+                    console.log('⚠️ Sezione #accordion_I non trovata');
+                    // Invia messaggio all'app
+                    if (userId) {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Sezione iscrizioni non trovata sul portale'
+                        });
+                    }
+                    throw new Error('Sezione Iscrizioni Gara non trovata');
                 }
-            });
-            console.log('🐛 [DEBUG] ✅ Sezione espansa!');
-            await new Promise(resolve => setTimeout(resolve, 1000));
+
+                // Clicca sull'header per espandere
+                const espanso = await page.evaluate(() => {
+                    const header = document.querySelector('#accordion_I h3.ui-accordion-header');
+                    if (!header) return false;
+                    
+                    // Se già espanso, non fare nulla
+                    if (header.getAttribute('aria-expanded') === 'true') {
+                        return true;
+                    }
+                    
+                    header.click();
+                    return true;
+                });
+
+                if (!espanso) {
+                    console.log('⚠️ Impossibile espandere la sezione');
+                    if (userId) {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Impossibile espandere la sezione iscrizioni'
+                        });
+                    }
+                    throw new Error('Impossibile espandere la sezione');
+                }
+
+                console.log('✅ Sezione Iscrizioni Gara espansa');
+
+                // Attendi che il select diventi visibile
+                await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
+                selectVisibile = true;
+                console.log('✅ Select #turno_sel visibile');
+
+            } catch (error) {
+                console.error('❌ Errore espansione sezione:', error);
+                // Invia errore all'app se possibile
+                if (userId) {
+                    try {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Errore durante il caricamento dei giorni: ' + error.message
+                        });
+                    } catch (wsError) {
+                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                    }
+                }
+                throw error;
+            }
+
+            // Se il select non è visibile, interrompi
+            if (!selectVisibile) {
+                throw new Error('Select dei turni non visibile');
+            }
 
             // ============================================================
             // 9. LEGGI I GIORNI DISPONIBILI DAL PORTALE
             // ============================================================
             console.log('🐛 [DEBUG] Step 11: 📋 Leggo i giorni disponibili...');
 
-            const giorniDisponibili = await page.evaluate(() => {
+            let giorniDisponibili = await page.evaluate(() => {
                 const select = document.querySelector('select#turno_sel');
                 if (!select) {
                     console.log('🐛 [DEBUG] ❌ Select #turno_sel non trovato!');
@@ -443,6 +510,36 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 return giorni;
             });
 
+            // Controlla se ci sono turni con posti liberi
+            const turniConPosti = giorniDisponibili.filter(g => parseInt(g.postiLiberi) > 0);
+
+            if (turniConPosti.length === 0) {
+                console.log('⚠️ Tutti i turni sono pieni!');
+                // Aggiungi l'opzione esubero ai giorni da mostrare all'utente
+                giorniDisponibili.push({
+                    value: '',
+                    testo: 'Esubero senza preferenza (tutti i turni sono pieni)',
+                    data: 'Esubero',
+                    postiLiberi: '0',
+                    isEsubero: true
+                });
+                // Invia un messaggio speciale all'app
+                if (userId) {
+                    try {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'GIORNI_DISPONIBILI', {
+                            iscrizioneId: idIscrizione,
+                            giorni: giorniDisponibili,
+                            tuttiPieni: true,
+                            messaggio: 'Tutti i turni sono pieni. Puoi iscriverti in esubero.'
+                        });
+                        console.log('✅ Messaggio esubero inviato via WebSocket');
+                    } catch (wsError) {
+                        console.log('⚠️ Errore invio messaggio esubero via WebSocket:', wsError.message);
+                    }
+                }
+            }
+
             console.log(`🐛 [DEBUG] 📊 Trovati ${giorniDisponibili.length} giorni disponibili:`);
             giorniDisponibili.forEach(g => {
                 console.log(`🐛 [DEBUG]   - ${g.data}: ${g.postiLiberi} posti liberi (value: ${g.value})`);
@@ -463,9 +560,8 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 .eq('id', idIscrizione);
             console.log('✅ Giorni salvati nel database');
 
-            // 2. INVIA I GIORNI ALL'APP VIA WEBSOCKET
-            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
-            if (userId) {
+            // 2. INVIA I GIORNI ALL'APP VIA WEBSOCKET (se non già inviato per l'esubero)
+            if (userId && turniConPosti.length > 0) {
                 console.log(`📤 Invio giorni via WebSocket all'utente: ${userId}`);
                 try {
                     const { sendToApp } = await import('../services/websocketService.js');
@@ -477,7 +573,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 } catch (wsError) {
                     console.log('⚠️ Errore invio WebSocket:', wsError.message);
                 }
-            } else {
+            } else if (!userId) {
                 console.log('⚠️ Nessun user_id trovato per l\'iscrizione');
             }
 
@@ -526,10 +622,18 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 await page.select('select#turno_sel', giornoSelezionato.value);
                 console.log('✅ Giorno selezionato!');
             } else {
-                console.log(`⚠️ Giorno ${giornoScelto} non trovato tra quelli disponibili. Usa il primo.`);
-                if (giorniDisponibili.length > 0) {
-                    await page.select('select#turno_sel', giorniDisponibili[0].value);
-                    console.log(`✅ Selezionato il primo giorno: ${giorniDisponibili[0].data}`);
+                // Se è stato scelto l'esubero (value vuoto) o un giorno non trovato
+                if (giornoScelto === 'Esubero' || giornoScelto === '') {
+                    console.log('✅ Opzione esubero selezionata');
+                    // Seleziona l'opzione vuota (esubero)
+                    await page.select('select#turno_sel', '');
+                    console.log('✅ Esubero selezionato!');
+                } else {
+                    console.log(`⚠️ Giorno ${giornoScelto} non trovato tra quelli disponibili. Usa il primo.`);
+                    if (giorniDisponibili.length > 0) {
+                        await page.select('select#turno_sel', giorniDisponibili[0].value);
+                        console.log(`✅ Selezionato il primo giorno: ${giorniDisponibili[0].data}`);
+                    }
                 }
             }
 
