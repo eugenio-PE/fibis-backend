@@ -642,17 +642,3 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
     }
 }
 
-// ============================================================
-// AVVIO DIRETTO (per test)
-// ============================================================
-(async () => {
-    const idIscrizione = process.argv[2];
-    if (!idIscrizione) {
-        console.log('❌ Specifica un ID iscrizione: node src/workers/iscrizioneWorker.js <id>');
-        process.exit(1);
-    }
-
-    console.log(`🚀 Avvio manuale iscrizione ${idIscrizione}...`);
-    const result = await eseguiIscrizioneGara(idIscrizione);
-    console.log('📊 Risultato:', result);
-})();
