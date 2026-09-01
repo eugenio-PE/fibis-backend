@@ -185,7 +185,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         // ============================================================
         console.log('🐛 [DEBUG] Step 6: 🔧 Impostazione filtri...');
 
-                // 🔹 1. RECUPERA INFO DAL DATABASE (case-insensitive)
+        // 🔹 1. RECUPERA INFO DAL DATABASE (case-insensitive)
         const tipologia = iscrizione.gare.tipologia?.toLowerCase();
         const regione = iscrizione.gare.regione;
 
@@ -268,6 +268,8 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         // ============================================================
         console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
 
+        let idPortale = null; // ✅ DICHIARATO QUI (fuori dal try)
+
         try {
             // Attendi che la gara appaia nella tabella
             await page.waitForFunction(
@@ -344,107 +346,24 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             console.log('🐛 [DEBUG] ✅ Gara trovata!');
             console.log(`🆔 ID riga: ${garaTrovata.id}`);
 
-// ============================================================
-// 6. CERCA LA GARA NELLA LISTA (CON waitForFunction)
-// ============================================================
-console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
-
-let idPortale = null; // ✅ DICHIARATO QUI (fuori dal try)
-
-try {
-    // Attendi che la gara appaia nella tabella
-    await page.waitForFunction(
-        (nomeGara) => {
-            const rows = document.querySelectorAll('#eventiDT tbody tr');
-            return Array.from(rows).some(row => row.textContent.includes(nomeGara));
-        },
-        { timeout: 10000, polling: 300 },
-        iscrizione.gare.nome
-    );
-
-    // Estrai i dati
-    const garaTrovata = await page.evaluate((nomeGara) => {
-        const rows = document.querySelectorAll('#eventiDT tbody tr');
-        for (const row of rows) {
-            if (row.textContent.includes(nomeGara)) {
-                return { id: row.id, html: row.outerHTML };
+            // ✅ Estrai l'ID dal formato "SE_XXXXX" (SENZA let, perché già dichiarato)
+            if (garaTrovata.id && garaTrovata.id.startsWith('SE_')) {
+                idPortale = garaTrovata.id.replace('SE_', '');
+                console.log(`🔑 ID portale estratto: ${idPortale}`);
+            } else {
+                idPortale = garaTrovata.id;
+                console.log(`🔑 ID portale: ${idPortale}`);
             }
-        }
-        return null;
-    }, iscrizione.gare.nome);
 
-    console.log(`✅ Gara trovata! ID riga: ${garaTrovata.id}`);
-
-    // FALLBACK: se non trovata, prova a rimuovere il filtro regione
-    if (!garaTrovata) {
-        console.log('⚠️ Gara non trovata con i filtri attuali. Provo senza filtro regione...');
-        
-        // Rimuovi il filtro regione (desOrganizzatore_f = 0)
-        await page.evaluate(() => {
-            const select = document.querySelector('select[name="desOrganizzatore_f"]');
-            if (select) {
-                select.value = '0';
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-                return true;
-            }
-            return false;
-        });
-        
-        // Attendine il ricaricamento
-        await page.waitForSelector('#eventiDT tbody tr', { timeout: 10000 });
-        
-        // Riprova a cercare con waitForFunction
-        await page.waitForFunction(
-            (nomeGara) => {
+        } catch (error) {
+            // Se va in timeout, logga lo stato della tabella
+            const debugInfo = await page.evaluate(() => {
                 const rows = document.querySelectorAll('#eventiDT tbody tr');
-                return Array.from(rows).some(row => row.textContent.includes(nomeGara));
-            },
-            { timeout: 10000, polling: 300 },
-            iscrizione.gare.nome
-        );
-
-        const garaTrovataFallback = await page.evaluate((nomeGara) => {
-            const rows = document.querySelectorAll('#eventiDT tbody tr');
-            for (const row of rows) {
-                if (row.textContent.includes(nomeGara)) {
-                    return { id: row.id, html: row.outerHTML };
-                }
-            }
-            return null;
-        }, iscrizione.gare.nome);
-
-        if (garaTrovataFallback) {
-            console.log(`✅ Gara trovata (fallback)! ID riga: ${garaTrovataFallback.id}`);
-            // Assegna alla variabile garaTrovata
-            Object.assign(garaTrovata, garaTrovataFallback);
+                return Array.from(rows).map(r => r.textContent.replace(/\s+/g, ' ').trim());
+            });
+            console.log('⚠️ Contenuto tabella al timeout:', debugInfo);
+            throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
-    }
-
-    if (!garaTrovata) {
-        throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
-    }
-
-    console.log('🐛 [DEBUG] ✅ Gara trovata!');
-    console.log(`🆔 ID riga: ${garaTrovata.id}`);
-
-    // ✅ Estrai l'ID dal formato "SE_XXXXX" (SENZA let, perché già dichiarato)
-    if (garaTrovata.id && garaTrovata.id.startsWith('SE_')) {
-        idPortale = garaTrovata.id.replace('SE_', '');
-        console.log(`🔑 ID portale estratto: ${idPortale}`);
-    } else {
-        idPortale = garaTrovata.id;
-        console.log(`🔑 ID portale: ${idPortale}`);
-    }
-
-} catch (error) {
-    // Se va in timeout, logga lo stato della tabella
-    const debugInfo = await page.evaluate(() => {
-        const rows = document.querySelectorAll('#eventiDT tbody tr');
-        return Array.from(rows).map(r => r.textContent.replace(/\s+/g, ' ').trim());
-    });
-    console.log('⚠️ Contenuto tabella al timeout:', debugInfo);
-    throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
-}
 
         // ============================================================
         // 7. NAVIGAZIONE DIRETTA ALLA PAGINA ISCRIZIONI
@@ -754,6 +673,4 @@ try {
         await browser.close();
     }
 }
-
-
 
