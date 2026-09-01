@@ -419,10 +419,15 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                     console.log('⚠️ Sezione #accordion_I non trovata');
                     // Invia messaggio all'app
                     if (userId) {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
-                            message: 'Sezione iscrizioni non trovata sul portale'
-                        });
+                        try {
+                            const { sendToApp } = await import('../services/websocketService.js');
+                            sendToApp(userId, 'ERRORE', {
+                                message: 'Sezione iscrizioni non trovata sul portale'
+                            });
+                            console.log('📤 Messaggio errore inviato all\'app');
+                        } catch (wsError) {
+                            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                        }
                     }
                     throw new Error('Sezione Iscrizioni Gara non trovata');
                 }
@@ -444,10 +449,15 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 if (!espanso) {
                     console.log('⚠️ Impossibile espandere la sezione');
                     if (userId) {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
-                            message: 'Impossibile espandere la sezione iscrizioni'
-                        });
+                        try {
+                            const { sendToApp } = await import('../services/websocketService.js');
+                            sendToApp(userId, 'ERRORE', {
+                                message: 'Impossibile espandere la sezione iscrizioni'
+                            });
+                            console.log('📤 Messaggio errore inviato all\'app');
+                        } catch (wsError) {
+                            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                        }
                     }
                     throw new Error('Impossibile espandere la sezione');
                 }
@@ -468,6 +478,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                         sendToApp(userId, 'ERRORE', {
                             message: 'Errore durante il caricamento dei giorni: ' + error.message
                         });
+                        console.log('📤 Messaggio errore inviato all\'app');
                     } catch (wsError) {
                         console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
                     }
@@ -509,6 +520,23 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 console.log(`🐛 [DEBUG] Trovati ${giorni.length} giorni validi`);
                 return giorni;
             });
+
+            // ✅ CONTROLLA SE NON CI SONO GIORNI DISPONIBILI
+            if (giorniDisponibili.length === 0) {
+                console.log('⚠️ Nessun giorno disponibile per questa gara');
+                if (userId) {
+                    try {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Nessun giorno disponibile per questa gara'
+                        });
+                        console.log('📤 Messaggio errore inviato all\'app');
+                    } catch (wsError) {
+                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                    }
+                }
+                throw new Error('Nessun giorno disponibile');
+            }
 
             // Controlla se ci sono turni con posti liberi
             const turniConPosti = giorniDisponibili.filter(g => parseInt(g.postiLiberi) > 0);
@@ -604,6 +632,17 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
             if (!giornoScelto) {
                 console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
+                if (userId) {
+                    try {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Tempo scaduto per la selezione del giorno'
+                        });
+                        console.log('📤 Messaggio timeout inviato all\'app');
+                    } catch (wsError) {
+                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                    }
+                }
                 throw new Error('Timeout attesa scelta utente');
             }
 
@@ -740,10 +779,40 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         } else if (statoIscrizioni === 'Estrazioni') {
             console.log('🐛 [DEBUG] ⚠️ Iscrizioni CHIUSE per questa gara.');
             console.log('⚠️ Iscrizioni CHIUSE per questa gara.');
+            
+            // ✅ INVIA MESSAGGIO ALL'APP PRIMA DI LANCIARE L'ERRORE
+            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+            if (userId) {
+                try {
+                    const { sendToApp } = await import('../services/websocketService.js');
+                    sendToApp(userId, 'ERRORE', {
+                        message: 'Le iscrizioni per questa gara sono chiuse'
+                    });
+                    console.log('📤 Messaggio errore inviato all\'app');
+                } catch (wsError) {
+                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                }
+            }
+            
             throw new Error('Iscrizioni chiuse');
         } else {
             console.log(`🐛 [DEBUG] ❌ Stato non riconosciuto: ${statoIscrizioni}`);
             console.log('❌ Stato non riconosciuto:', statoIscrizioni);
+            
+            // ✅ INVIA MESSAGGIO ALL'APP PER STATO NON RICONOSCIUTO
+            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+            if (userId) {
+                try {
+                    const { sendToApp } = await import('../services/websocketService.js');
+                    sendToApp(userId, 'ERRORE', {
+                        message: `Stato iscrizioni non riconosciuto: ${statoIscrizioni}`
+                    });
+                    console.log('📤 Messaggio errore inviato all\'app');
+                } catch (wsError) {
+                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                }
+            }
+            
             throw new Error(`Stato iscrizioni non riconosciuto: ${statoIscrizioni}`);
         }
 
@@ -754,6 +823,20 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
     } catch (error) {
         console.error('❌ [ISCRIZIONE WORKER] Errore:', error);
+
+        // ✅ INVIA ERRORE ALL'APP PRIMA DI FALLIRE
+        try {
+            const userId = iscrizione?.user_id || iscrizione?.tesserati?.user_id;
+            if (userId) {
+                const { sendToApp } = await import('../services/websocketService.js');
+                sendToApp(userId, 'ERRORE', {
+                    message: 'Errore durante l\'iscrizione: ' + error.message
+                });
+                console.log('📤 Messaggio errore generico inviato all\'app');
+            }
+        } catch (wsError) {
+            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+        }
 
         // Salvo screenshot dell'errore per debug
         try {
@@ -777,4 +860,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         await browser.close();
     }
 }
+
+
 
