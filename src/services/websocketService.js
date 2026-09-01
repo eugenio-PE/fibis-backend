@@ -72,18 +72,19 @@ export function initWebSocketServer(server) {
 // ============================================================
 async function handleWebSocketMessage(ws, userId, data) {
     switch (data.type) {
-        case 'ISCRIZIONE_GIORNI_RICHIESTI':
-            // L'app chiede i giorni disponibili per una gara
-            const { idIscrizione, idGara } = data.payload;
-            console.log(`📨 [WS] Richiesta giorni per iscrizione ${idIscrizione}`);
-            
-            // Avvia il worker in background
-            // Il worker invierà i giorni via WebSocket quando pronti
-            import('../workers/iscrizioneWorker.js').then(({ eseguiIscrizioneGara }) => {
-                // Passiamo l'ID dell'utente per l'invio WebSocket
-                eseguiIscrizioneGara(idIscrizione, userId);
-            });
-            break;
+case 'ISCRIZIONE_GIORNI_RICHIESTI':
+    const { idIscrizione, idGara } = data.payload;
+    console.log(`📨 [WS] Richiesta giorni per iscrizione ${idIscrizione}`);
+    console.log(`🔍 [WS] idIscrizione = ${idIscrizione}, tipo = ${typeof idIscrizione}`);
+    console.log(`🔍 [WS] userId = ${userId}, tipo = ${typeof userId}`);
+    
+    import('../workers/iscrizioneWorker.js').then(({ eseguiIscrizioneGara }) => {
+        console.log(`🔍 [WS] Worker caricato, chiamo con id: ${idIscrizione}`);
+        eseguiIscrizioneGara(idIscrizione, userId);
+    }).catch(err => {
+        console.error('❌ [WS] Errore caricamento worker:', err);
+    });
+    break;
 
         case 'ISCRIZIONE_GIORNO_SCELTO':
             // L'utente ha scelto un giorno
