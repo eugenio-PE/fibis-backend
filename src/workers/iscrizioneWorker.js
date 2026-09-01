@@ -38,33 +38,25 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         if (iscrizioneError || !iscrizione) {
             throw new Error(`Iscrizione non trovata: ${idIscrizione}`);
         }
-    // ✅ AGGIUNGI: se userIdFromClient è passato, aggiorna user_id
-    if (userIdFromClient && !iscrizione.user_id) {
-        await supabaseAdmin
-            .from('iscrizioni_gare')
-            .update({ user_id: userIdFromClient })
-            .eq('id', idIscrizione);
-        console.log(`✅ user_id aggiornato: ${userIdFromClient}`);
-        // Ricarica l'iscrizione per avere il nuovo user_id
-        const { data: updatedIscrizione } = await supabaseAdmin
-            .from('iscrizioni_gare')
-            .select(`*, gare (*), tesserati (*)`)
-            .eq('id', idIscrizione)
-            .single();
-        Object.assign(iscrizione, updatedIscrizione);
-    }
-        console.log(`📋 Iscrizione: ${iscrizione.id}`);
-        console.log(`  - Gara: ${iscrizione.gare.nome}`);
-        console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
-        console.log(`  - Giorno: ${iscrizione.giorno_iscrizione}`);
-
-        // Dopo aver caricato iscrizione, se non ha user_id ma ci è stato passato
+        // ✅ AGGIUNGI: se userIdFromClient è passato, aggiorna user_id
         if (userIdFromClient && !iscrizione.user_id) {
             await supabaseAdmin
                 .from('iscrizioni_gare')
                 .update({ user_id: userIdFromClient })
                 .eq('id', idIscrizione);
+            console.log(`✅ user_id aggiornato: ${userIdFromClient}`);
+            // Ricarica l'iscrizione per avere il nuovo user_id
+            const { data: updatedIscrizione } = await supabaseAdmin
+                .from('iscrizioni_gare')
+                .select(`*, gare (*), tesserati (*)`)
+                .eq('id', idIscrizione)
+                .single();
+            Object.assign(iscrizione, updatedIscrizione);
         }
+        console.log(`📋 Iscrizione: ${iscrizione.id}`);
+        console.log(`  - Gara: ${iscrizione.gare.nome}`);
+        console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
+        console.log(`  - Giorno: ${iscrizione.giorno_iscrizione}`);
 
         // 2. RECUPERA L'ASD DEL TESSERATO (non della gara!)
         const { data: tesserato, error: tesseratoError } = await supabaseAdmin
@@ -185,36 +177,77 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // ============================================================
-        // 4. IMPOSTA FILTRI
+        // 4. IMPOSTA FILTRI (DINAMICI)
         // ============================================================
         console.log('🐛 [DEBUG] Step 6: 🔧 Impostazione filtri...');
 
+        // 🔹 1. RECUPERA INFO DAL DATABASE
+        const tipologia = iscrizione.gare.tipologia;
+        const regione = iscrizione.gare.regione;
+
+        // 🔹 2. FILTRI DI BASE (validi per tutti)
         const filters = {
-            'siNo_attivitaBase_f': '1',      // Sì
-            'siNo_eventiFuturi_f': '1',      // Sì (solo futuri)
-            'siNo_eventiInteresse_f': '1',   // Sì
-            'statoApprovazione_f': '999',    // Tutti
-            'classeevento_f': '0',           // Tutti
+            'siNo_eventiFuturi_f': '1',        // Solo eventi futuri
+            'statoApprovazione_f': '999',      // Tutti gli stati
+            'classeevento_f': '0',             // Tutti i livelli
+            'stagione_f': '2026',              // Stagione corrente
+            'desOrganizzatore_f': '0',         // Default: nessun filtro
+            'siNo_attivitaBase_f': '2',        // Default: No
+            'siNo_eventiInteresse_f': '2',     // Default: No
         };
 
+        // 🔹 3. FILTRI IN BASE ALLA TIPOLOGIA
+        if (tipologia === 'Istituzionale' || tipologia === 'Riservata') {
+            // Istituzionale/Riservata → filtro per regione + attività di base
+            filters['desOrganizzatore_f'] = `C.R. ${regione.toUpperCase()}`;
+            filters['siNo_attivitaBase_f'] = '1';  // Sì (attività di base)
+            console.log(`📌 Tipologia ${tipologia}: filtro per regione ${regione}`);
+        } else if (tipologia === 'Fibis Challenge') {
+            // Fibis Challenge → nazionale (nessun filtro regione)
+            filters['desOrganizzatore_f'] = 'FISBB NAZIONALE';
+            filters['siNo_attivitaBase_f'] = '0';  // No
+            console.log('📌 Tipologia Fibis Challenge: filtro nazionale');
+        } else if (tipologia === 'Libera') {
+            // Libera → filtro per regione + attività di base NO
+            filters['desOrganizzatore_f'] = `C.R. ${regione.toUpperCase()}`;
+            filters['siNo_attivitaBase_f'] = '0';  // No
+            console.log(`📌 Tipologia Libera: filtro per regione ${regione}`);
+        }
+
+        // 🔹 4. IMPOSTA FILTRI NEL BROWSER
         const filtersSet = await page.evaluate((filters) => {
             let count = 0;
+            const results = [];
             Object.keys(filters).forEach(name => {
                 const select = document.querySelector(`select[name="${name}"]`);
                 if (select) {
-                    console.log(`🐛 [DEBUG] ✅ Filtro ${name} trovato, imposto a ${filters[name]}`);
+                    const oldValue = select.value;
                     select.value = filters[name];
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                     count++;
+                    results.push({ name, oldValue, newValue: filters[name] });
                 } else {
                     console.log(`🐛 [DEBUG] ❌ Filtro ${name} NON TROVATO!`);
                 }
             });
-            return count;
+            return { count, results };
         }, filters);
 
-        console.log(`🐛 [DEBUG] 📊 Filtri impostati: ${filtersSet}/${Object.keys(filters).length}`);
-        console.log(`✅ ${filtersSet} filtri impostati`);
+        console.log(`✅ ${filtersSet.count} filtri impostati`);
+        console.log('📊 Dettaglio filtri:', filtersSet.results);
+
+        // 🔹 5. IMPOSTA VISUALIZZAZIONE 100 ELEMENTI
+        console.log('🐛 [DEBUG] Imposto visualizzazione 100 elementi...');
+        await page.evaluate(() => {
+            const select = document.querySelector('select[name="eventiDT_length"]');
+            if (select) {
+                select.value = '100';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }
+            return false;
+        });
+        console.log('✅ Visualizzazione 100 elementi impostata');
 
         // ============================================================
         // 5. ATTESA AGGIORNAMENTO LISTA GARE
@@ -229,7 +262,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         // ============================================================
         console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
 
-        const garaTrovata = await page.evaluate((nomeGara) => {
+        let garaTrovata = await page.evaluate((nomeGara) => {
             const rows = document.querySelectorAll('#eventiDT tbody tr');
             console.log(`🐛 [DEBUG] 📊 Totale gare nella lista: ${rows.length}`);
             for (const row of rows) {
@@ -237,26 +270,74 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 console.log(`🐛 [DEBUG] Controllo riga: "${text.substring(0, 80)}..."`);
                 if (text.includes(nomeGara)) {
                     console.log(`🐛 [DEBUG] ✅ Gara trovata!`);
-                    return row;
+                    return {
+                        id: row.id,
+                        html: row.outerHTML
+                    };
                 }
             }
             console.log(`🐛 [DEBUG] ❌ Gara "${nomeGara}" NON TROVATA!`);
             return null;
         }, iscrizione.gare.nome);
 
+        // FALLBACK: se non trovata, prova a rimuovere il filtro regione
+        if (!garaTrovata) {
+            console.log('⚠️ Gara non trovata con i filtri attuali. Provo senza filtro regione...');
+            
+            // Rimuovi il filtro regione (desOrganizzatore_f = 0)
+            await page.evaluate(() => {
+                const select = document.querySelector('select[name="desOrganizzatore_f"]');
+                if (select) {
+                    select.value = '0';
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                }
+                return false;
+            });
+            
+            // Attendine il ricaricamento
+            await page.waitForSelector('#eventiDT tbody tr', { timeout: 10000 });
+            
+            // Riprova a cercare
+            garaTrovata = await page.evaluate((nomeGara) => {
+                const rows = document.querySelectorAll('#eventiDT tbody tr');
+                console.log(`🐛 [DEBUG] 📊 Totale gare nella lista (fallback): ${rows.length}`);
+                for (const row of rows) {
+                    const text = row.textContent;
+                    if (text.includes(nomeGara)) {
+                        console.log(`🐛 [DEBUG] ✅ Gara trovata (fallback)!`);
+                        return {
+                            id: row.id,
+                            html: row.outerHTML
+                        };
+                    }
+                }
+                return null;
+            }, iscrizione.gare.nome);
+        }
+
         if (!garaTrovata) {
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
+
         console.log('🐛 [DEBUG] ✅ Gara trovata!');
-        console.log('✅ Gara trovata!');
+        console.log(`🆔 ID riga: ${garaTrovata.id}`);
+
+        // ✅ Estrai l'ID dal formato "SE_XXXXX"
+        let idPortale = null;
+        if (garaTrovata.id && garaTrovata.id.startsWith('SE_')) {
+            idPortale = garaTrovata.id.replace('SE_', '');
+            console.log(`🔑 ID portale estratto: ${idPortale}`);
+        } else {
+            idPortale = garaTrovata.id;
+            console.log(`🔑 ID portale: ${idPortale}`);
+        }
 
         // ============================================================
         // 7. NAVIGAZIONE DIRETTA ALLA PAGINA ISCRIZIONI
         // ============================================================
         console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
-        const rowId = garaTrovata.id;
-        const urlIscrizioni = `https://tesseramento.fibis.it/GS_accreditiEvento?idE=${rowId}`;
-        console.log(`🐛 [DEBUG] URL iscrizioni: ${urlIscrizioni}`);
+        const urlIscrizioni = `https://tesseramento.fibis.it/GS_accreditiEvento?idE=${idPortale}`;
         console.log(`🔗 URL iscrizioni: ${urlIscrizioni}`);
 
         await page.goto(urlIscrizioni, {
@@ -265,6 +346,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         });
         console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
         console.log('✅ Pagina iscrizioni caricata!');
+
+        // ✅ Aspetta che la pagina sia completamente caricata
+        await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
+        console.log('✅ Sezione iscrizioni trovata');
 
         // ============================================================
         // 8. VERIFICA STATO ISCRIZIONI
@@ -557,3 +642,17 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
     }
 }
 
+// ============================================================
+// AVVIO DIRETTO (per test)
+// ============================================================
+(async () => {
+    const idIscrizione = process.argv[2];
+    if (!idIscrizione) {
+        console.log('❌ Specifica un ID iscrizione: node src/workers/iscrizioneWorker.js <id>');
+        process.exit(1);
+    }
+
+    console.log(`🚀 Avvio manuale iscrizione ${idIscrizione}...`);
+    const result = await eseguiIscrizioneGara(idIscrizione);
+    console.log('📊 Risultato:', result);
+})();
