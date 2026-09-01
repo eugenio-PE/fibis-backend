@@ -181,8 +181,8 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         // ============================================================
         console.log('🐛 [DEBUG] Step 6: 🔧 Impostazione filtri...');
 
-        // 🔹 1. RECUPERA INFO DAL DATABASE
-        const tipologia = iscrizione.gare.tipologia;
+                // 🔹 1. RECUPERA INFO DAL DATABASE (case-insensitive)
+        const tipologia = iscrizione.gare.tipologia?.toLowerCase();
         const regione = iscrizione.gare.regione;
 
         // 🔹 2. FILTRI DI BASE (validi per tutti)
@@ -196,22 +196,25 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             'siNo_eventiInteresse_f': '2',     // Default: No
         };
 
-        // 🔹 3. FILTRI IN BASE ALLA TIPOLOGIA
-        if (tipologia === 'Istituzionale' || tipologia === 'Riservata') {
+        // 🔹 3. FILTRI IN BASE ALLA TIPOLOGIA (case-insensitive)
+        if (tipologia === 'istituzionale' || tipologia === 'riservata') {
             // Istituzionale/Riservata → filtro per regione + attività di base
             filters['desOrganizzatore_f'] = `C.R. ${regione.toUpperCase()}`;
             filters['siNo_attivitaBase_f'] = '1';  // Sì (attività di base)
             console.log(`📌 Tipologia ${tipologia}: filtro per regione ${regione}`);
-        } else if (tipologia === 'Fibis Challenge') {
+        } else if (tipologia === 'fibis challenge') {
             // Fibis Challenge → nazionale (nessun filtro regione)
             filters['desOrganizzatore_f'] = 'FISBB NAZIONALE';
             filters['siNo_attivitaBase_f'] = '0';  // No
             console.log('📌 Tipologia Fibis Challenge: filtro nazionale');
-        } else if (tipologia === 'Libera') {
+        } else if (tipologia === 'libera') {
             // Libera → filtro per regione + attività di base NO
             filters['desOrganizzatore_f'] = `C.R. ${regione.toUpperCase()}`;
             filters['siNo_attivitaBase_f'] = '0';  // No
             console.log(`📌 Tipologia Libera: filtro per regione ${regione}`);
+        } else {
+            // Fallback: se tipologia non riconosciuta, usa filtri base
+            console.log(`⚠️ Tipologia non riconosciuta: "${tipologia}", uso filtri base`);
         }
 
         // 🔹 4. IMPOSTA FILTRI NEL BROWSER
@@ -235,7 +238,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
         console.log(`✅ ${filtersSet.count} filtri impostati`);
         console.log('📊 Dettaglio filtri:', filtersSet.results);
-
         // 🔹 5. IMPOSTA VISUALIZZAZIONE 100 ELEMENTI
         console.log('🐛 [DEBUG] Imposto visualizzazione 100 elementi...');
         await page.evaluate(() => {
