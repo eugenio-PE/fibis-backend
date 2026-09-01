@@ -136,6 +136,10 @@ export const createGara = async (req, res) => {
 // POST /api/gare/:id/iscriviti
 // Iscrizione automatica di un tesserato a una gara
 // ============================================================
+// ============================================================
+// POST /api/gare/:id/iscriviti
+// Iscrizione automatica di un tesserato a una gara
+// ============================================================
 export const iscrivitiGara = async (req, res) => {
     try {
         const { id } = req.params;
@@ -144,11 +148,19 @@ export const iscrivitiGara = async (req, res) => {
 
         console.log(`📝 Iscrizione richiesta: gara=${id}, tesserato=${id_tesserato}, giorno=${giorno_iscrizione}`);
 
+        // ✅ CONVERTI IN NUMERO PRIMA DI USARE
+        const idGaraNum = parseInt(id, 10);
+        const idTesseratoNum = parseInt(id_tesserato, 10);
+
+        if (isNaN(idGaraNum) || isNaN(idTesseratoNum)) {
+            return res.status(400).json({ error: 'ID gara o tesserato non validi' });
+        }
+
         // 1. Verifica che l'utente sia autenticato e sia un tesserato
         const { data: tesserato, error: tesseratoError } = await supabaseAdmin
             .from('tesserati')
             .select('id, nome, cognome, user_id')
-            .eq('id', id_tesserato)
+            .eq('id', idTesseratoNum)
             .eq('user_id', userId)
             .single();
 
@@ -165,7 +177,7 @@ export const iscrivitiGara = async (req, res) => {
         const { data: gara, error: garaError } = await supabaseAdmin
             .from('gare')
             .select('*')
-            .eq('id', id)
+            .eq('id', idGaraNum)
             .single();
 
         if (garaError || !gara) {
@@ -187,27 +199,64 @@ export const iscrivitiGara = async (req, res) => {
 
         console.log(`✅ Iscrizioni aperte: ${gara.data_inizio_iscrizioni} → ${gara.data_fine_iscrizioni}`);
 
-        // 4. Verifica che il tesserato non sia già iscritto
+        // 4. Verifica che il tesserato non sia già iscritto (CON I TIPI CORRETTI)
+        console.log('🔍 Verifica iscrizione esistente...');
         const { data: existing, error: existingError } = await supabaseAdmin
             .from('iscrizioni_gare')
             .select('id, stato')
-            .eq('id_gara', id)
-            .eq('id_tesserato', id_tesserato)
+            .eq('id_gara', idGaraNum)
+            .eq('id_tesserato', idTesseratoNum)
             .maybeSingle();
+
+        if (existingError) {
+            console.error('❌ Errore verifica iscrizione esistente:', existingError);
+            throw existingError;
+        }
+
+        console.log(`🔍 Iscrizione esistente: ${existing ? 'SI (stato=' + existing.stato + ')' : 'NO'}`);
 
         if (existing) {
             if (existing.stato === 'completata') {
                 return res.status(400).json({ error: 'Tesserato già iscritto a questa gara' });
             }
-            if (existing.stato === 'in_attesa' || existing.stato === 'in_corso') {
+            if (['in_attesa', 'in_corso', 'in_attesa_giorni', 'in_attesa_completamento'].includes(existing.stato)) {
                 return res.status(400).json({ error: 'Iscrizione già in corso' });
+            }
+            // ✅ Se è fallita, possiamo riprovare
+            if (existing.stato === 'fallita') {
+                console.log(`🔄 Riavvio iscrizione fallita: ${existing.id}`);
+                const { data: updated, error: updateError } = await supabaseAdmin
+                    .from('iscrizioni_gare')
+                    .update({ stato: 'in_attesa', ultimo_errore: null })
+                    .eq('id', existing.id)
+                    .select()
+                    .single();
+                
+                if (updateError) {
+                    console.error('❌ Errore riavvio iscrizione:', updateError);
+                    throw updateError;
+                }
+                
+                // Avvia il worker per l'iscrizione riavviata
+                import('../workers/iscrizioneWorker.js').then(({ eseguiIscrizioneGara }) => {
+                    eseguiIscrizioneGara(existing.id);
+                }).catch(err => {
+                    console.error('❌ Errore caricamento worker:', err);
+                });
+                
+                return res.status(200).json({
+                    success: true,
+                    message: 'Iscrizione riavviata',
+                    id: existing.id
+                });
             }
         }
 
         // 5. Crea l'iscrizione nel database
+        console.log('📝 Creazione nuova iscrizione...');
         const insertData = {
-            id_gara: parseInt(id),
-            id_tesserato: parseInt(id_tesserato),
+            id_gara: idGaraNum,
+            id_tesserato: idTesseratoNum,
             stato: 'in_attesa'
         };
 
@@ -238,19 +287,15 @@ export const iscrivitiGara = async (req, res) => {
                 .catch(error => {
                     console.error(`❌ Iscrizione ${iscrizione.id} fallita:`, error);
                 });
+        }).catch(err => {
+            console.error('❌ Errore caricamento worker:', err);
         });
 
         // 7. Restituisci risposta immediata
         res.status(201).json({
             success: true,
             message: 'Iscrizione avviata',
-            id: iscrizione.id,
-            data: {
-                id_iscrizione: iscrizione.id,
-                stato: iscrizione.stato,
-                tesserato: `${tesserato.nome} ${tesserato.cognome}`,
-                gara: gara.nome
-            }
+            id: iscrizione.id
         });
 
     } catch (error) {
@@ -258,7 +303,6 @@ export const iscrivitiGara = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
-
 // ============================================================
 // PUT /api/gare/:id
 // Aggiorna una gara esistente (solo admin)
