@@ -278,18 +278,7 @@ export const iscrivitiGara = async (req, res) => {
 
         console.log(`✅ Iscrizione creata: ${iscrizione.id}`);
 
-        // 6. Avvia il worker in background (senza aspettare)
-        import('../workers/iscrizioneWorker.js').then(({ eseguiIscrizioneGara }) => {
-            eseguiIscrizioneGara(iscrizione.id)
-                .then(result => {
-                    console.log(`✅ Iscrizione ${iscrizione.id} completata:`, result);
-                })
-                .catch(error => {
-                    console.error(`❌ Iscrizione ${iscrizione.id} fallita:`, error);
-                });
-        }).catch(err => {
-            console.error('❌ Errore caricamento worker:', err);
-        });
+
 
         // 7. Restituisci risposta immediata
         res.status(201).json({
