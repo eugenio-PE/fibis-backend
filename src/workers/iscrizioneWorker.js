@@ -384,116 +384,105 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         console.log('✅ Sezione iscrizioni trovata');
 
         // ============================================================
-        // 8. VERIFICA STATO ISCRIZIONI
+        // 8. CERCA IL TASTO "ISCRIZIONI GARA"
         // ============================================================
-        console.log('🐛 [DEBUG] Step 10: 🔍 Verifica stato iscrizioni...');
+        console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
 
-        const statoIscrizioni = await page.evaluate(() => {
-            const header = document.querySelector('h3.ui-accordion-header');
-            const text = header ? header.textContent?.trim() : null;
-            console.log(`🐛 [DEBUG] Stato iscrizioni trovato: "${text}"`);
-            return text;
-        });
+        const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+        let selectVisibile = false;
 
-        if (statoIscrizioni === 'Iscrizioni') {
-            console.log('🐛 [DEBUG] ✅ Iscrizioni APERTE!');
-            console.log('✅ Iscrizioni APERTE! Procedo...');
+        try {
+            // 1. Cerca il tasto "Iscrizioni Gara"
+            const tastoIscrizioni = await page.evaluate(() => {
+                const accordionI = document.querySelector('#accordion_I');
+                if (!accordionI) return false;
+                
+                const header = accordionI.querySelector('h3.ui-accordion-header');
+                return !!header;
+            });
 
-            // ============================================================
-            // 8.5 ESPANDI LA SEZIONE "ISCRIZIONI GARA"
-            // ============================================================
-            console.log('🐛 [DEBUG] Espando la sezione "Iscrizioni Gara"...');
-
-            // Recupera userId per eventuali messaggi
-            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
-            let selectVisibile = false;
-
-            try {
-                // Verifica se la sezione esiste
-                const sezioneTrovata = await page.evaluate(() => {
-                    const accordionI = document.querySelector('#accordion_I');
-                    return !!accordionI;
-                });
-
-                if (!sezioneTrovata) {
-                    console.log('⚠️ Sezione #accordion_I non trovata');
-                    // Invia messaggio all'app
-                    if (userId) {
-                        try {
-                            const { sendToApp } = await import('../services/websocketService.js');
-                            sendToApp(userId, 'ERRORE', {
-                                message: 'Sezione iscrizioni non trovata sul portale'
-                            });
-                            console.log('📤 Messaggio errore inviato all\'app');
-                        } catch (wsError) {
-                            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                        }
-                    }
-                    throw new Error('Sezione Iscrizioni Gara non trovata');
-                }
-
-                // Clicca sull'header per espandere
-                const espanso = await page.evaluate(() => {
-                    const header = document.querySelector('#accordion_I h3.ui-accordion-header');
-                    if (!header) return false;
-                    
-                    // Se già espanso, non fare nulla
-                    if (header.getAttribute('aria-expanded') === 'true') {
-                        return true;
-                    }
-                    
-                    header.click();
-                    return true;
-                });
-
-                if (!espanso) {
-                    console.log('⚠️ Impossibile espandere la sezione');
-                    if (userId) {
-                        try {
-                            const { sendToApp } = await import('../services/websocketService.js');
-                            sendToApp(userId, 'ERRORE', {
-                                message: 'Impossibile espandere la sezione iscrizioni'
-                            });
-                            console.log('📤 Messaggio errore inviato all\'app');
-                        } catch (wsError) {
-                            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                        }
-                    }
-                    throw new Error('Impossibile espandere la sezione');
-                }
-
-                console.log('✅ Sezione Iscrizioni Gara espansa');
-
-                // Attendi che il select diventi visibile
-                await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
-                selectVisibile = true;
-                console.log('✅ Select #turno_sel visibile');
-
-            } catch (error) {
-                console.error('❌ Errore espansione sezione:', error);
-                // Invia errore all'app se possibile
+            if (!tastoIscrizioni) {
+                console.log('⚠️ Tasto "Iscrizioni Gara" non trovato - Iscrizioni chiuse');
+                // Invia messaggio all'app
                 if (userId) {
                     try {
                         const { sendToApp } = await import('../services/websocketService.js');
                         sendToApp(userId, 'ERRORE', {
-                            message: 'Errore durante il caricamento dei giorni: ' + error.message
+                            message: 'Le iscrizioni per questa gara sono chiuse'
                         });
                         console.log('📤 Messaggio errore inviato all\'app');
                     } catch (wsError) {
                         console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
                     }
                 }
-                throw error;
+                throw new Error('Iscrizioni chiuse');
             }
 
-            // Se il select non è visibile, interrompi
-            if (!selectVisibile) {
-                throw new Error('Select dei turni non visibile');
+            console.log('✅ Tasto "Iscrizioni Gara" trovato!');
+
+            // 2. Clicca sull'header per espandere
+            const espanso = await page.evaluate(() => {
+                const header = document.querySelector('#accordion_I h3.ui-accordion-header');
+                if (!header) return false;
+                
+                // Se già espanso, non fare nulla
+                if (header.getAttribute('aria-expanded') === 'true') {
+                    return true;
+                }
+                
+                header.click();
+                return true;
+            });
+
+            if (!espanso) {
+                console.log('⚠️ Impossibile espandere la sezione');
+                if (userId) {
+                    try {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Impossibile espandere la sezione iscrizioni'
+                        });
+                        console.log('📤 Messaggio errore inviato all\'app');
+                    } catch (wsError) {
+                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                    }
+                }
+                throw new Error('Impossibile espandere la sezione');
             }
 
-            // ============================================================
-            // 9. LEGGI I GIORNI DISPONIBILI DAL PORTALE
-            // ============================================================
+            console.log('✅ Sezione Iscrizioni Gara espansa');
+
+            // 3. Attendi che il select diventi visibile
+            await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
+            selectVisibile = true;
+            console.log('✅ Select #turno_sel visibile');
+
+        } catch (error) {
+            console.error('❌ Errore espansione sezione:', error);
+            // Invia errore all'app se possibile
+            if (userId) {
+                try {
+                    const { sendToApp } = await import('../services/websocketService.js');
+                    sendToApp(userId, 'ERRORE', {
+                        message: 'Errore durante il caricamento dei giorni: ' + error.message
+                    });
+                    console.log('📤 Messaggio errore inviato all\'app');
+                } catch (wsError) {
+                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                }
+            }
+            throw error;
+        }
+
+        // Se il select non è visibile, interrompi
+        if (!selectVisibile) {
+            throw new Error('Select dei turni non visibile');
+        }
+
+        // ============================================================
+        // 9. LEGGI I GIORNI DISPONIBILI DAL PORTALE
+        // ============================================================
+        
             console.log('🐛 [DEBUG] Step 11: 📋 Leggo i giorni disponibili...');
 
             let giorniDisponibili = await page.evaluate(() => {
