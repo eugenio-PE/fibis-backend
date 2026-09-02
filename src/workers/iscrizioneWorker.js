@@ -268,7 +268,8 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         // ============================================================
         console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
 
-        let idPortale = null; // ✅ DICHIARATO QUI (fuori dal try)
+        let idPortale = null;
+        let garaTrovata = null; // ✅ DICHIARATO QUI (fuori dal try)
 
         try {
             // Attendi che la gara appaia nella tabella
@@ -282,7 +283,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             );
 
             // Estrai i dati
-            const garaTrovata = await page.evaluate((nomeGara) => {
+            garaTrovata = await page.evaluate((nomeGara) => {
                 const rows = document.querySelectorAll('#eventiDT tbody tr');
                 for (const row of rows) {
                     if (row.textContent.includes(nomeGara)) {
@@ -366,29 +367,128 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         // ============================================================
-        // 7. NAVIGAZIONE DIRETTA ALLA PAGINA ISCRIZIONI
+        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON MOUSE REALE
         // ============================================================
-        console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
-        const urlIscrizioni = `https://tesseramento.fibis.it/GS_accreditiEvento?idE=${idPortale}`;
-        console.log(`🔗 URL iscrizioni: ${urlIscrizioni}`);
+        console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni con mouse reale...');
 
-        await page.goto(urlIscrizioni, {
-            waitUntil: 'networkidle2',
-            timeout: 30000
-        });
-        console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
-        console.log('✅ Pagina iscrizioni caricata!');
+        const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+        let navigazioneRiuscita = false;
 
-        // ✅ Aspetta che la pagina sia completamente caricata
-        await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
-        console.log('✅ Sezione iscrizioni trovata');
+        try {
+            // 1. Clicca sulla riga della gara con il mouse di Puppeteer
+            const rowSelector = `#${garaTrovata.id}`;
+            await page.waitForSelector(rowSelector, { visible: true, timeout: 5000 });
+            
+            const rowElement = await page.$(rowSelector);
+            if (!rowElement) {
+                throw new Error(`Elemento riga non trovato: ${rowSelector}`);
+            }
+            
+            const rowBox = await rowElement.boundingBox();
+            if (!rowBox) {
+                throw new Error('Impossibile ottenere le coordinate della riga');
+            }
+            
+            // Muovi il mouse al centro della riga
+            await page.mouse.move(
+                rowBox.x + rowBox.width / 2,
+                rowBox.y + rowBox.height / 2
+            );
+            
+            // Clicca con il mouse (sinistro)
+            await page.mouse.click(
+                rowBox.x + rowBox.width / 2,
+                rowBox.y + rowBox.height / 2,
+                { button: 'left' }
+            );
+            console.log('✅ Click sulla riga eseguito con mouse reale');
+
+            // 2. Attendi che il menu contestuale appaia
+            await page.waitForSelector('.context-menu-item', { visible: true, timeout: 5000 });
+            console.log('✅ Menu contestuale apparso');
+
+            // 3. Trova l'elemento "Iscrizioni"
+            const menuItems = await page.$$('.context-menu-item');
+            let iscrizioniItem = null;
+            for (const item of menuItems) {
+                const text = await page.evaluate(el => el.textContent.trim(), item);
+                if (text.toLowerCase() === 'iscrizioni') {
+                    iscrizioniItem = item;
+                    break;
+                }
+            }
+
+            if (!iscrizioniItem) {
+                throw new Error('Voce "Iscrizioni" non trovata nel menu contestuale');
+            }
+
+            // 4. Clicca su "Iscrizioni" con il mouse di Puppeteer
+            const itemBox = await iscrizioniItem.boundingBox();
+            if (!itemBox) {
+                throw new Error('Impossibile ottenere le coordinate della voce Iscrizioni');
+            }
+            
+            console.log('✅ Voce Iscrizioni trovata, clicco...');
+            
+            // Aspetta la navigazione e clicca
+            await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                page.mouse.click(
+                    itemBox.x + itemBox.width / 2,
+                    itemBox.y + itemBox.height / 2
+                )
+            ]);
+            
+            console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
+            console.log('✅ Pagina iscrizioni caricata!');
+            navigazioneRiuscita = true;
+
+        } catch (error) {
+            console.error('❌ Errore navigazione con mouse reale:', error.message);
+            console.log('⚠️ Tentativo fallback: navigazione diretta...');
+            
+            // FALLBACK: navigazione diretta (vecchio metodo)
+            try {
+                const urlIscrizioni = `https://tesseramento.fibis.it/GS_accreditiEvento?idE=${idPortale}`;
+                console.log(`🔗 URL iscrizioni (fallback): ${urlIscrizioni}`);
+                
+                await page.goto(urlIscrizioni, {
+                    waitUntil: 'networkidle2',
+                    timeout: 30000
+                });
+                console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata (fallback)! URL: ${page.url()}`);
+                console.log('✅ Pagina iscrizioni caricata (fallback)!');
+                navigazioneRiuscita = true;
+            } catch (fallbackError) {
+                console.error('❌ Anche il fallback è fallito:', fallbackError.message);
+                
+                // Invia errore all'app
+                if (userId) {
+                    try {
+                        const { sendToApp } = await import('../services/websocketService.js');
+                        sendToApp(userId, 'ERRORE', {
+                            message: 'Impossibile aprire la pagina delle iscrizioni: ' + error.message
+                        });
+                    } catch (wsError) {
+                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                    }
+                }
+                throw new Error(`Impossibile navigare alla pagina iscrizioni: ${error.message}`);
+            }
+        }
+
+        // ✅ Se la navigazione è riuscita (con uno dei due metodi), verifica che la pagina sia caricata
+        if (navigazioneRiuscita) {
+            // ✅ Aspetta che la pagina sia completamente caricata
+            await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
+            console.log('✅ Sezione iscrizioni trovata');
+        }
 
         // ============================================================
         // 8. CERCA IL TASTO "ISCRIZIONI GARA"
         // ============================================================
         console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
 
-        const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
         let selectVisibile = false;
 
         // ✅ DICHIARA LO STATO ISCRIZIONI QUI
