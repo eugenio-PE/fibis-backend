@@ -391,6 +391,9 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
         let selectVisibile = false;
 
+        // ✅ DICHIARA LO STATO ISCRIZIONI QUI
+        let statoIscrizioni = null;
+
         try {
             // 1. Cerca il tasto "Iscrizioni Gara"
             const tastoIscrizioni = await page.evaluate(() => {
@@ -457,6 +460,19 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             selectVisibile = true;
             console.log('✅ Select #turno_sel visibile');
 
+            // 4. LEGGI LO STATO DELLE ISCRIZIONI
+            statoIscrizioni = await page.evaluate(() => {
+                // Cerca il testo che indica lo stato delle iscrizioni
+                const container = document.querySelector('#accordion_I .ui-accordion-content');
+                if (!container) return null;
+                const text = container.textContent;
+                if (text.includes('Iscrizioni Attive')) return 'Attive';
+                if (text.includes('Estrazioni')) return 'Estrazioni';
+                return 'Altro';
+            });
+
+            console.log(`🐛 [DEBUG] Stato iscrizioni rilevato: ${statoIscrizioni}`);
+
         } catch (error) {
             console.error('❌ Errore espansione sezione:', error);
             // Invia errore all'app se possibile
@@ -480,9 +496,9 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         // ============================================================
-        // 9. LEGGI I GIORNI DISPONIBILI DAL PORTALE
+        // 9. GESTISCI LO STATO DELLE ISCRIZIONI
         // ============================================================
-        
+        if (statoIscrizioni === 'Attive') {
             console.log('🐛 [DEBUG] Step 11: 📋 Leggo i giorni disponibili...');
 
             let giorniDisponibili = await page.evaluate(() => {
@@ -770,7 +786,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             console.log('⚠️ Iscrizioni CHIUSE per questa gara.');
             
             // ✅ INVIA MESSAGGIO ALL'APP PRIMA DI LANCIARE L'ERRORE
-            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
             if (userId) {
                 try {
                     const { sendToApp } = await import('../services/websocketService.js');
@@ -789,7 +804,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             console.log('❌ Stato non riconosciuto:', statoIscrizioni);
             
             // ✅ INVIA MESSAGGIO ALL'APP PER STATO NON RICONOSCIUTO
-            const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
             if (userId) {
                 try {
                     const { sendToApp } = await import('../services/websocketService.js');
