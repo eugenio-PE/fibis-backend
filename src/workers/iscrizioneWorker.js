@@ -367,143 +367,144 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         // ============================================================
-        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON MOUSE REALE
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni con mouse reale...');
+       // ============================================================
+// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON MOUSE REALE E FALLBACK
+// ============================================================
+console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
-        const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
-        let navigazioneRiuscita = false;
+const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+let navigazioneRiuscita = false;
+let tentativi = 0;
+const maxTentativi = 3;
 
-        try {
-            // 1. Porta la riga nel viewport PRIMA di cliccare (scroll immediato, non smooth)
-            console.log('🐛 [DEBUG] Porta la riga nel viewport...');
-            await page.evaluate((rowId) => {
-                const row = document.querySelector(`#${rowId}`);
-                if (row) {
-                    row.scrollIntoView({ behavior: 'auto', block: 'center' });
-                }
-            }, garaTrovata.id);
+// Offset da provare in ordine
+const offsets = [20, 30, 10, 0, -10, 40, -20];
 
-            // Attendi lo scroll
-            await new Promise(resolve => setTimeout(resolve, 1500));
+while (tentativi < maxTentativi && !navigazioneRiuscita) {
+    tentativi++;
+    console.log(`🔄 Tentativo ${tentativi}/${maxTentativi}`);
 
-            // 2. TENTATIVO 1: Click con page.click() (più semplice)
-            console.log('🐛 [DEBUG] Tentativo 1: page.click()...');
+    try {
+        // 1. Porta la riga nel viewport
+        await page.evaluate((rowId) => {
+            const row = document.querySelector(`#${rowId}`);
+            if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, garaTrovata.id);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 2. Trova il trigger .cm-FULL_3
+        const triggerSelector = `#${garaTrovata.id} .cm-FULL_3`;
+        await page.waitForSelector(triggerSelector, { visible: true, timeout: 5000 });
+        const trigger = await page.$(triggerSelector);
+        const box = await trigger.boundingBox();
+
+        // 3. Prova diversi offset finché il menu non si apre
+        let menuAperto = false;
+        let offsetUsato = null;
+
+        for (const offset of offsets) {
+            const clickX = box.x + box.width / 2 + offset;
+            const clickY = box.y + box.height / 2;
+
+            console.log(`  📍 Provo offset ${offset}px: x=${clickX.toFixed(0)}, y=${clickY.toFixed(0)}`);
+
+            // Muovi e clicca con il mouse
+            await page.mouse.move(clickX, clickY);
+            await page.mouse.click(clickX, clickY, { button: 'left' });
+
+            // Aspetta 300ms per il menu
             try {
-                await page.click(`#${garaTrovata.id}`, { button: 'left' });
-                await new Promise(resolve => setTimeout(resolve, 300));
-                await page.waitForSelector('.context-menu-item', { visible: true, timeout: 2000 });
-                console.log('✅ Menu aperto con page.click()!');
-                navigazioneRiuscita = true;
+                await page.waitForSelector('.context-menu-list', { visible: true, timeout: 1000 });
+                menuAperto = true;
+                offsetUsato = offset;
+                console.log(`  ✅ Menu aperto con offset ${offset}px!`);
+                break;
             } catch (e) {
-                console.log(`⚠️ page.click() fallito: ${e.message}`);
+                // Chiudi eventuale menu aperto
+                await page.keyboard.press('Escape');
+                // Piccola pausa prima del prossimo tentativo
+                await new Promise(r => setTimeout(r, 200));
             }
-
-            // 3. TENTATIVO 2: Se fallisce, prova con mouse.move + mousedown + mouseup
-            if (!navigazioneRiuscita) {
-                console.log('🐛 [DEBUG] Tentativo 2: mouse.move + mousedown + mouseup...');
-                try {
-                    const rowSelector = `#${garaTrovata.id}`;
-                    const rowElement = await page.$(rowSelector);
-                    const rowBox = await rowElement.boundingBox();
-                    
-                    const x = rowBox.x + rowBox.width / 2;
-                    const y = rowBox.y + rowBox.height / 2;
-                    
-                    console.log(`🐛 [DEBUG] Coordinate: x=${Math.round(x)}, y=${Math.round(y)}`);
-                    
-                    await page.mouse.move(x, y);
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    await page.mouse.down({ button: 'left' });
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    await page.mouse.up({ button: 'left' });
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    
-                    await page.waitForSelector('.context-menu-item', { visible: true, timeout: 3000 });
-                    console.log('✅ Menu aperto con mouse.move + mousedown + up!');
-                    navigazioneRiuscita = true;
-                } catch (e) {
-                    console.log(`⚠️ mouse.move fallito: ${e.message}`);
-                }
-            }
-
-            // 4. Se nessun tentativo ha funzionato, errore
-            if (!navigazioneRiuscita) {
-                throw new Error('Impossibile aprire il menu contestuale con nessun metodo');
-            }
-
-            // 5. Trova l'elemento "Iscrizioni" nel menu (solo elementi visibili)
-            console.log('🐛 [DEBUG] Cerco voce "Iscrizioni" nel menu...');
-            const menuItems = await page.$$('.context-menu-item');
-            let iscrizioniItem = null;
-            for (const item of menuItems) {
-                // Verifica che l'elemento sia visibile
-                const isVisible = await page.evaluate(el => {
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0 && el.offsetParent !== null;
-                }, item);
-                
-                if (!isVisible) {
-                    console.log('🐛 [DEBUG] Voce menu nascosta, saltata');
-                    continue;
-                }
-                
-                const text = await page.evaluate(el => el.textContent.trim(), item);
-                console.log(`🐛 [DEBUG] Voce menu visibile: "${text}"`);
-                if (text.toLowerCase() === 'iscrizioni') {
-                    iscrizioniItem = item;
-                    break;
-                }
-            }
-
-            if (!iscrizioniItem) {
-                throw new Error('Voce "Iscrizioni" non trovata nel menu contestuale');
-            }
-
-            // 6. Clicca su "Iscrizioni" e attendi la navigazione
-            console.log('✅ Voce Iscrizioni trovata, clicco...');
-            const itemBox = await iscrizioniItem.boundingBox();
-            const itemX = itemBox.x + itemBox.width / 2;
-            const itemY = itemBox.y + itemBox.height / 2;
-
-            // Usa mouse.move + mousedown + up per il click (più affidabile)
-            await Promise.all([
-                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-                (async () => {
-                    await page.mouse.move(itemX, itemY);
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await page.mouse.down({ button: 'left' });
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await page.mouse.up({ button: 'left' });
-                })()
-            ]);
-
-            console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
-            console.log('✅ Pagina iscrizioni caricata!');
-
-            // ✅ Aspetta che la pagina sia completamente caricata
-            await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
-            console.log('✅ Sezione iscrizioni trovata');
-
-        } catch (error) {
-            console.error('❌ Errore navigazione iscrizioni:', error.message);
-            
-            // Invia errore all'app
-            if (userId) {
-                try {
-                    const { sendToApp } = await import('../services/websocketService.js');
-                    sendToApp(userId, 'ERRORE', {
-                        message: 'Impossibile aprire la pagina delle iscrizioni: ' + error.message
-                    });
-                } catch (wsError) {
-                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                }
-            }
-            throw error;
         }
 
-        // ============================================================
-        // 8. CERCA IL TASTO "ISCRIZIONI GARA"
+        if (!menuAperto) {
+            throw new Error('Impossibile aprire il menu con nessun offset');
+        }
+
+        // 4. Attendi 150ms per l'assestamento
+        await new Promise(r => setTimeout(r, 150));
+
+        // 5. Trova la voce "Iscrizioni"
+        const itemIscrizioni = await page.evaluateHandle(() => {
+            const items = Array.from(document.querySelectorAll('.context-menu-item'));
+            return items.find(el => el.textContent.trim().toLowerCase().includes('iscrizioni'));
+        });
+
+        if (!itemIscrizioni) {
+            throw new Error('Voce "Iscrizioni" non trovata nel menu');
+        }
+
+        console.log('✅ Voce "Iscrizioni" trovata!');
+
+        // 6. Clicca su "Iscrizioni" e attendi la navigazione
+        await Promise.all([
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }),
+            itemIscrizioni.asElement().click()
+        ]);
+
+        navigazioneRiuscita = true;
+        console.log(`✅ Navigazione riuscita al tentativo ${tentativi} (offset ${offsetUsato}px)`);
+        console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
+        console.log('✅ Pagina iscrizioni caricata!');
+
+    } catch (error) {
+        console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
+
+        // Se non è l'ultimo tentativo, aspetta prima di riprovare (backoff)
+        if (tentativi < maxTentativi) {
+            const waitTime = 1000 * tentativi; // 1s, 2s, 3s
+            console.log(`⏳ Attendo ${waitTime}ms prima del prossimo tentativo...`);
+            await new Promise(r => setTimeout(r, waitTime));
+
+            // Ricarica la pagina per resetto
+            try {
+                await page.reload({ waitUntil: 'networkidle2' });
+                // Riapplica i filtri dopo il reload
+                // ... (qui puoi richiamare la funzione per reimpostare i filtri)
+            } catch (reloadError) {
+                console.warn('⚠️ Errore durante il reload:', reloadError.message);
+            }
+        }
+    }
+}
+
+// Se tutti i tentativi sono falliti
+if (!navigazioneRiuscita) {
+    console.error('❌ Tutti i tentativi di navigazione sono falliti');
+
+    // Invia errore all'app
+    if (userId) {
+        try {
+            const { sendToApp } = await import('../services/websocketService.js');
+            sendToApp(userId, 'ERRORE', {
+                message: 'Impossibile aprire la pagina delle iscrizioni dopo 3 tentativi'
+            });
+        } catch (wsError) {
+            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+        }
+    }
+    throw new Error('Impossibile navigare alla pagina iscrizioni dopo 3 tentativi');
+}
+
+// ✅ Verifica che la pagina sia caricata
+try {
+    await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
+    console.log('✅ Sezione iscrizioni trovata');
+} catch (error) {
+    console.warn('⚠️ Sezione iscrizioni non trovata, ma continuo...');
+}
         // ============================================================
         console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
 
