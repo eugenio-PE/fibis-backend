@@ -375,43 +375,81 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         let navigazioneRiuscita = false;
 
         try {
-            // 1. Clicca sulla riga della gara con il mouse di Puppeteer
-            const rowSelector = `#${garaTrovata.id}`;
-            await page.waitForSelector(rowSelector, { visible: true, timeout: 5000 });
-            
-            const rowElement = await page.$(rowSelector);
-            if (!rowElement) {
-                throw new Error(`Elemento riga non trovato: ${rowSelector}`);
-            }
-            
-            const rowBox = await rowElement.boundingBox();
-            if (!rowBox) {
-                throw new Error('Impossibile ottenere le coordinate della riga');
-            }
-            
-            // Muovi il mouse al centro della riga
-            await page.mouse.move(
-                rowBox.x + rowBox.width / 2,
-                rowBox.y + rowBox.height / 2
-            );
-            
-            // Clicca con il mouse (sinistro)
-            await page.mouse.click(
-                rowBox.x + rowBox.width / 2,
-                rowBox.y + rowBox.height / 2,
-                { button: 'left' }
-            );
-            console.log('✅ Click sulla riga eseguito con mouse reale');
+            // 1. Porta la riga nel viewport PRIMA di cliccare (scroll immediato, non smooth)
+            console.log('🐛 [DEBUG] Porta la riga nel viewport...');
+            await page.evaluate((rowId) => {
+                const row = document.querySelector(`#${rowId}`);
+                if (row) {
+                    row.scrollIntoView({ behavior: 'auto', block: 'center' });
+                }
+            }, garaTrovata.id);
 
-            // 2. Attendi che il menu contestuale appaia
-            await page.waitForSelector('.context-menu-item', { visible: true, timeout: 5000 });
-            console.log('✅ Menu contestuale apparso');
+            // Attendi lo scroll
+            await new Promise(resolve => setTimeout(resolve, 1500));
 
-            // 3. Trova l'elemento "Iscrizioni"
+            // 2. TENTATIVO 1: Click con page.click() (più semplice)
+            console.log('🐛 [DEBUG] Tentativo 1: page.click()...');
+            try {
+                await page.click(`#${garaTrovata.id}`, { button: 'left' });
+                await new Promise(resolve => setTimeout(resolve, 300));
+                await page.waitForSelector('.context-menu-item', { visible: true, timeout: 2000 });
+                console.log('✅ Menu aperto con page.click()!');
+                navigazioneRiuscita = true;
+            } catch (e) {
+                console.log(`⚠️ page.click() fallito: ${e.message}`);
+            }
+
+            // 3. TENTATIVO 2: Se fallisce, prova con mouse.move + mousedown + mouseup
+            if (!navigazioneRiuscita) {
+                console.log('🐛 [DEBUG] Tentativo 2: mouse.move + mousedown + mouseup...');
+                try {
+                    const rowSelector = `#${garaTrovata.id}`;
+                    const rowElement = await page.$(rowSelector);
+                    const rowBox = await rowElement.boundingBox();
+                    
+                    const x = rowBox.x + rowBox.width / 2;
+                    const y = rowBox.y + rowBox.height / 2;
+                    
+                    console.log(`🐛 [DEBUG] Coordinate: x=${Math.round(x)}, y=${Math.round(y)}`);
+                    
+                    await page.mouse.move(x, y);
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    await page.mouse.down({ button: 'left' });
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    await page.mouse.up({ button: 'left' });
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    await page.waitForSelector('.context-menu-item', { visible: true, timeout: 3000 });
+                    console.log('✅ Menu aperto con mouse.move + mousedown + up!');
+                    navigazioneRiuscita = true;
+                } catch (e) {
+                    console.log(`⚠️ mouse.move fallito: ${e.message}`);
+                }
+            }
+
+            // 4. Se nessun tentativo ha funzionato, errore
+            if (!navigazioneRiuscita) {
+                throw new Error('Impossibile aprire il menu contestuale con nessun metodo');
+            }
+
+            // 5. Trova l'elemento "Iscrizioni" nel menu (solo elementi visibili)
+            console.log('🐛 [DEBUG] Cerco voce "Iscrizioni" nel menu...');
             const menuItems = await page.$$('.context-menu-item');
             let iscrizioniItem = null;
             for (const item of menuItems) {
+                // Verifica che l'elemento sia visibile
+                const isVisible = await page.evaluate(el => {
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0 && el.offsetParent !== null;
+                }, item);
+                
+                if (!isVisible) {
+                    console.log('🐛 [DEBUG] Voce menu nascosta, saltata');
+                    continue;
+                }
+                
                 const text = await page.evaluate(el => el.textContent.trim(), item);
+                console.log(`🐛 [DEBUG] Voce menu visibile: "${text}"`);
                 if (text.toLowerCase() === 'iscrizioni') {
                     iscrizioniItem = item;
                     break;
@@ -422,66 +460,46 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 throw new Error('Voce "Iscrizioni" non trovata nel menu contestuale');
             }
 
-            // 4. Clicca su "Iscrizioni" con il mouse di Puppeteer
-            const itemBox = await iscrizioniItem.boundingBox();
-            if (!itemBox) {
-                throw new Error('Impossibile ottenere le coordinate della voce Iscrizioni');
-            }
-            
+            // 6. Clicca su "Iscrizioni" e attendi la navigazione
             console.log('✅ Voce Iscrizioni trovata, clicco...');
-            
-            // Aspetta la navigazione e clicca
+            const itemBox = await iscrizioniItem.boundingBox();
+            const itemX = itemBox.x + itemBox.width / 2;
+            const itemY = itemBox.y + itemBox.height / 2;
+
+            // Usa mouse.move + mousedown + up per il click (più affidabile)
             await Promise.all([
                 page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-                page.mouse.click(
-                    itemBox.x + itemBox.width / 2,
-                    itemBox.y + itemBox.height / 2
-                )
+                (async () => {
+                    await page.mouse.move(itemX, itemY);
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    await page.mouse.down({ button: 'left' });
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    await page.mouse.up({ button: 'left' });
+                })()
             ]);
-            
+
             console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
             console.log('✅ Pagina iscrizioni caricata!');
-            navigazioneRiuscita = true;
 
-        } catch (error) {
-            console.error('❌ Errore navigazione con mouse reale:', error.message);
-            console.log('⚠️ Tentativo fallback: navigazione diretta...');
-            
-            // FALLBACK: navigazione diretta (vecchio metodo)
-            try {
-                const urlIscrizioni = `https://tesseramento.fibis.it/GS_accreditiEvento?idE=${idPortale}`;
-                console.log(`🔗 URL iscrizioni (fallback): ${urlIscrizioni}`);
-                
-                await page.goto(urlIscrizioni, {
-                    waitUntil: 'networkidle2',
-                    timeout: 30000
-                });
-                console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata (fallback)! URL: ${page.url()}`);
-                console.log('✅ Pagina iscrizioni caricata (fallback)!');
-                navigazioneRiuscita = true;
-            } catch (fallbackError) {
-                console.error('❌ Anche il fallback è fallito:', fallbackError.message);
-                
-                // Invia errore all'app
-                if (userId) {
-                    try {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
-                            message: 'Impossibile aprire la pagina delle iscrizioni: ' + error.message
-                        });
-                    } catch (wsError) {
-                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                    }
-                }
-                throw new Error(`Impossibile navigare alla pagina iscrizioni: ${error.message}`);
-            }
-        }
-
-        // ✅ Se la navigazione è riuscita (con uno dei due metodi), verifica che la pagina sia caricata
-        if (navigazioneRiuscita) {
             // ✅ Aspetta che la pagina sia completamente caricata
             await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
             console.log('✅ Sezione iscrizioni trovata');
+
+        } catch (error) {
+            console.error('❌ Errore navigazione iscrizioni:', error.message);
+            
+            // Invia errore all'app
+            if (userId) {
+                try {
+                    const { sendToApp } = await import('../services/websocketService.js');
+                    sendToApp(userId, 'ERRORE', {
+                        message: 'Impossibile aprire la pagina delle iscrizioni: ' + error.message
+                    });
+                } catch (wsError) {
+                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+                }
+            }
+            throw error;
         }
 
         // ============================================================
