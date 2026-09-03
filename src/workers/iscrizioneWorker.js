@@ -367,7 +367,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         // ============================================================
-       // ============================================================
+// ============================================================
 // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON MOUSE REALE E FALLBACK
 // ============================================================
 console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
@@ -394,9 +394,16 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
         }, garaTrovata.id);
         await new Promise(resolve => setTimeout(resolve, 1000));
 
+        // ✅ 1.5 ATTENDI CHE LA RIGA SIA COMPLETAMENTE CARICATA
+        console.log('🐛 [DEBUG] Aspetto che la riga sia caricata...');
+        await page.waitForSelector(`#${garaTrovata.id} .cm-FULL_3`, { 
+            visible: true, 
+            timeout: 10000 
+        });
+        console.log('✅ Riga completamente caricata');
+
         // 2. Trova il trigger .cm-FULL_3
         const triggerSelector = `#${garaTrovata.id} .cm-FULL_3`;
-        await page.waitForSelector(triggerSelector, { visible: true, timeout: 5000 });
         const trigger = await page.$(triggerSelector);
         const box = await trigger.boundingBox();
 
@@ -410,11 +417,9 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
 
             console.log(`  📍 Provo offset ${offset}px: x=${clickX.toFixed(0)}, y=${clickY.toFixed(0)}`);
 
-            // Muovi e clicca con il mouse
             await page.mouse.move(clickX, clickY);
             await page.mouse.click(clickX, clickY, { button: 'left' });
 
-            // Aspetta 300ms per il menu
             try {
                 await page.waitForSelector('.context-menu-list', { visible: true, timeout: 1000 });
                 menuAperto = true;
@@ -422,9 +427,7 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
                 console.log(`  ✅ Menu aperto con offset ${offset}px!`);
                 break;
             } catch (e) {
-                // Chiudi eventuale menu aperto
                 await page.keyboard.press('Escape');
-                // Piccola pausa prima del prossimo tentativo
                 await new Promise(r => setTimeout(r, 200));
             }
         }
@@ -462,17 +465,13 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
     } catch (error) {
         console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
 
-        // Se non è l'ultimo tentativo, aspetta prima di riprovare (backoff)
         if (tentativi < maxTentativi) {
-            const waitTime = 1000 * tentativi; // 1s, 2s, 3s
+            const waitTime = 1000 * tentativi;
             console.log(`⏳ Attendo ${waitTime}ms prima del prossimo tentativo...`);
             await new Promise(r => setTimeout(r, waitTime));
 
-            // Ricarica la pagina per resetto
             try {
                 await page.reload({ waitUntil: 'networkidle2' });
-                // Riapplica i filtri dopo il reload
-                // ... (qui puoi richiamare la funzione per reimpostare i filtri)
             } catch (reloadError) {
                 console.warn('⚠️ Errore durante il reload:', reloadError.message);
             }
@@ -480,11 +479,8 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
     }
 }
 
-// Se tutti i tentativi sono falliti
 if (!navigazioneRiuscita) {
     console.error('❌ Tutti i tentativi di navigazione sono falliti');
-
-    // Invia errore all'app
     if (userId) {
         try {
             const { sendToApp } = await import('../services/websocketService.js');
@@ -505,8 +501,11 @@ try {
 } catch (error) {
     console.warn('⚠️ Sezione iscrizioni non trovata, ma continuo...');
 }
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
+
+// ============================================================
+// 8. CERCA IL TASTO "ISCRIZIONI GARA"
+// ============================================================
+console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
 
         let selectVisibile = false;
 
