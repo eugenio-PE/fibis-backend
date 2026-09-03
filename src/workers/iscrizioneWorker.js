@@ -366,301 +366,229 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
-// ============================================================
-// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (SOLUZIONE DEFINITIVA)
-// ============================================================
-console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
+        // ============================================================
+        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (SOLUZIONE DEFINITIVA)
+        // ============================================================
+        console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
-const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
-let navigazioneRiuscita = false;
-let tentativi = 0;
-const maxTentativi = 3;
+        const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+        let navigazioneRiuscita = false;
+        let tentativi = 0;
+        const maxTentativi = 3;
 
-while (tentativi < maxTentativi && !navigazioneRiuscita) {
-    tentativi++;
-    console.log(`🔄 Tentativo ${tentativi}/${maxTentativi}`);
+        while (tentativi < maxTentativi && !navigazioneRiuscita) {
+            tentativi++;
+            console.log(`🔄 Tentativo ${tentativi}/${maxTentativi}`);
 
-    try {
-        // 1. Scroll fino alla riga
-        await page.evaluate((rowId) => {
-            const row = document.querySelector(`#${rowId}`);
-            if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, garaTrovata.id);
-        await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                // 1. Scroll fino alla riga
+                await page.evaluate((rowId) => {
+                    const row = document.querySelector(`#${rowId}`);
+                    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, garaTrovata.id);
+                await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 2. APRI IL MENU CON JQUERY
-        const menuAperto = await page.evaluate((rowId) => {
-            const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
-            if (!triggerEl) return false;
-            
-            const rect = triggerEl.getBoundingClientRect();
-            const event = jQuery.Event('contextmenu', {
-                pageX: rect.left + window.scrollX + rect.width / 2,
-                pageY: rect.top + window.scrollY + rect.height / 2,
-                clientX: rect.left + rect.width / 2,
-                clientY: rect.top + rect.height / 2,
-                target: triggerEl
-            });
-            jQuery(triggerEl).trigger(event);
-            return true;
-        }, garaTrovata.id);
-
-        if (!menuAperto) throw new Error('Impossibile aprire il menu');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // 3. CHIAMA IL CALLBACK CON CONTESTO JQUERY (SOLUZIONE GEMINI)
-        const navigato = await page.evaluate((rowId) => {
-            // Trova "Iscrizioni" nel menu
-            const items = Array.from(document.querySelectorAll('.context-menu-item'));
-            const targetItem = items.find(item => 
-                item.textContent.trim().toLowerCase().includes('iscrizioni')
-            );
-            if (!targetItem) return false;
-            
-            // Estrai root e key
-            const root = $(targetItem).data('contextMenuRoot');
-            const key = $(targetItem).data('contextMenuKey');
-            
-            // Seleziona la riga con jQuery (NON DOM puro!)
-            const $triggerRow = $(`#${rowId}`);
-            if (!$triggerRow.length) return false;
-            
-            if (!root || !root.callback) return false;
-            
-            // ✅ PASSAGGIO CORRETTO: passa l'oggetto jQuery
-            // $(this).closest('tr').attr('id') funzionerà!
-            root.callback.call($triggerRow, key, root);
-            
-            return true;
-        }, garaTrovata.id);
-
-        if (!navigato) throw new Error('Impossibile chiamare il callback');
-
-        // 4. ATTENDI LA NAVIGAZIONE
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        navigazioneRiuscita = true;
-        console.log(`✅ Navigazione riuscita al tentativo ${tentativi}`);
-        console.log(`📐 URL: ${page.url()}`);
-
-    } catch (error) {
-        console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
-        if (tentativi < maxTentativi) {
-            await new Promise(r => setTimeout(r, 1000 * tentativi));
-            await page.reload({ waitUntil: 'networkidle2' });
-        }
-    }
-}
-
-if (!navigazioneRiuscita) {
-    if (userId) {
-        try {
-            const { sendToApp } = await import('../services/websocketService.js');
-            sendToApp(userId, 'ERRORE', {
-                message: 'Impossibile aprire la pagina delle iscrizioni dopo 3 tentativi'
-            });
-        } catch (wsError) {
-            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-        }
-    }
-    throw new Error('Impossibile navigare alla pagina iscrizioni dopo 3 tentativi');
-}
-
-console.log('✅ Step 7 completato!');
-// ============================================================
-// 7.5 VERIFICA PRECOMPILAZIONE (SOLO LOG)
-// ============================================================
-console.log('🐛 [DEBUG] Verifico se la pagina è precompilata...');
-
-try {
-    const isPrecompilata = await page.evaluate(() => {
-        const titolo = document.querySelector('h3.ui-accordion-header');
-        if (!titolo) return { precompilata: false, motivo: 'Nessun header trovato' };
-        
-        const testoHeader = titolo.textContent.trim();
-        const haIdGara = /\d+\s*-\s*/.test(testoHeader);
-        const selectTurno = document.querySelector('select#turno_sel');
-        const haSelect = !!selectTurno;
-        let opzioniCount = 0;
-        if (selectTurno) opzioniCount = selectTurno.options.length;
-        const haAccordionI = !!document.querySelector('#accordion_I');
-        const contieneMinerva = testoHeader.includes('MINERVA') || testoHeader.includes('TROFEO');
-        
-        const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI && contieneMinerva;
-        
-        return {
-            precompilata: precompilata,
-            dettagli: {
-                header: testoHeader,
-                haIdGara: haIdGara,
-                haSelect: haSelect,
-                opzioniCount: opzioniCount,
-                haAccordionI: haAccordionI,
-                contieneMinerva: contieneMinerva
-            }
-        };
-    });
-
-    console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
-    console.log('📋 Dettagli:', JSON.stringify(isPrecompilata.dettagli, null, 2));
-
-    if (!isPrecompilata.precompilata) {
-        console.warn('⚠️ Attenzione: pagina NON precompilata!');
-        console.warn('📋 Dettagli mancanti:', isPrecompilata.dettagli);
-        // NON blocchiamo il flusso, solo log
-    } else {
-        console.log('✅ Pagina precompilata confermata!');
-        console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
-        console.log(`📋 Opzioni select: ${isPrecompilata.dettagli.opzioniCount}`);
-    }
-} catch (error) {
-    console.warn('⚠️ Errore durante verifica precompilazione:', error.message);
-    // NON blocchiamo il flusso
-}
-
-
-// ============================================================
-// 8. CERCA IL TASTO "ISCRIZIONI GARA"
-// ============================================================
-console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
-
-        let selectVisibile = false;
-
-        // ✅ DICHIARA LO STATO ISCRIZIONI QUI
-        let statoIscrizioni = null;
-
-        try {
-            // 1. Cerca il tasto "Iscrizioni Gara"
-            const tastoIscrizioni = await page.evaluate(() => {
-                const accordionI = document.querySelector('#accordion_I');
-                if (!accordionI) return false;
-                
-                const header = accordionI.querySelector('h3.ui-accordion-header');
-                return !!header;
-            });
-
-            if (!tastoIscrizioni) {
-                console.log('⚠️ Tasto "Iscrizioni Gara" non trovato - Iscrizioni chiuse');
-                // Invia messaggio all'app
-                if (userId) {
-                    try {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
-                            message: 'Le iscrizioni per questa gara sono chiuse'
-                        });
-                        console.log('📤 Messaggio errore inviato all\'app');
-                    } catch (wsError) {
-                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                    }
-                }
-                throw new Error('Iscrizioni chiuse');
-            }
-
-            console.log('✅ Tasto "Iscrizioni Gara" trovato!');
-
-            // 2. Clicca sull'header per espandere
-            const espanso = await page.evaluate(() => {
-                const header = document.querySelector('#accordion_I h3.ui-accordion-header');
-                if (!header) return false;
-                
-                // Se già espanso, non fare nulla
-                if (header.getAttribute('aria-expanded') === 'true') {
+                // 2. APRI IL MENU CON JQUERY
+                const menuAperto = await page.evaluate((rowId) => {
+                    const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
+                    if (!triggerEl) return false;
+                    
+                    const rect = triggerEl.getBoundingClientRect();
+                    const event = jQuery.Event('contextmenu', {
+                        pageX: rect.left + window.scrollX + rect.width / 2,
+                        pageY: rect.top + window.scrollY + rect.height / 2,
+                        clientX: rect.left + rect.width / 2,
+                        clientY: rect.top + rect.height / 2,
+                        target: triggerEl
+                    });
+                    jQuery(triggerEl).trigger(event);
                     return true;
-                }
-                
-                header.click();
-                return true;
-            });
+                }, garaTrovata.id);
 
-            if (!espanso) {
-                console.log('⚠️ Impossibile espandere la sezione');
-                if (userId) {
-                    try {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
-                            message: 'Impossibile espandere la sezione iscrizioni'
-                        });
-                        console.log('📤 Messaggio errore inviato all\'app');
-                    } catch (wsError) {
-                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                    }
+                if (!menuAperto) throw new Error('Impossibile aprire il menu');
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                // 3. CHIAMA IL CALLBACK CON CONTESTO JQUERY (SOLUZIONE GEMINI)
+                const navigato = await page.evaluate((rowId) => {
+                    // Trova "Iscrizioni" nel menu
+                    const items = Array.from(document.querySelectorAll('.context-menu-item'));
+                    const targetItem = items.find(item => 
+                        item.textContent.trim().toLowerCase().includes('iscrizioni')
+                    );
+                    if (!targetItem) return false;
+                    
+                    // Estrai root e key
+                    const root = $(targetItem).data('contextMenuRoot');
+                    const key = $(targetItem).data('contextMenuKey');
+                    
+                    // Seleziona la riga con jQuery (NON DOM puro!)
+                    const $triggerRow = $(`#${rowId}`);
+                    if (!$triggerRow.length) return false;
+                    
+                    if (!root || !root.callback) return false;
+                    
+                    // ✅ PASSAGGIO CORRETTO: passa l'oggetto jQuery
+                    // $(this).closest('tr').attr('id') funzionerà!
+                    root.callback.call($triggerRow, key, root);
+                    
+                    return true;
+                }, garaTrovata.id);
+
+                if (!navigato) throw new Error('Impossibile chiamare il callback');
+
+                // 4. ATTENDI LA NAVIGAZIONE
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+                navigazioneRiuscita = true;
+                console.log(`✅ Navigazione riuscita al tentativo ${tentativi}`);
+                console.log(`📐 URL: ${page.url()}`);
+
+            } catch (error) {
+                console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
+                if (tentativi < maxTentativi) {
+                    await new Promise(r => setTimeout(r, 1000 * tentativi));
+                    await page.reload({ waitUntil: 'networkidle2' });
                 }
-                throw new Error('Impossibile espandere la sezione');
             }
+        }
 
-            console.log('✅ Sezione Iscrizioni Gara espansa');
-
-            // 3. Attendi che il select diventi visibile
-            await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
-            selectVisibile = true;
-            console.log('✅ Select #turno_sel visibile');
-
-            // 4. LEGGI LO STATO DELLE ISCRIZIONI
-            statoIscrizioni = await page.evaluate(() => {
-                // Cerca il testo che indica lo stato delle iscrizioni
-                const container = document.querySelector('#accordion_I .ui-accordion-content');
-                if (!container) return null;
-                const text = container.textContent;
-                if (text.includes('Iscrizioni Attive')) return 'Attive';
-                if (text.includes('Estrazioni')) return 'Estrazioni';
-                return 'Altro';
-            });
-
-            console.log(`🐛 [DEBUG] Stato iscrizioni rilevato: ${statoIscrizioni}`);
-
-        } catch (error) {
-            console.error('❌ Errore espansione sezione:', error);
-            // Invia errore all'app se possibile
+        if (!navigazioneRiuscita) {
             if (userId) {
                 try {
                     const { sendToApp } = await import('../services/websocketService.js');
                     sendToApp(userId, 'ERRORE', {
-                        message: 'Errore durante il caricamento dei giorni: ' + error.message
+                        message: 'Impossibile aprire la pagina delle iscrizioni dopo 3 tentativi'
                     });
-                    console.log('📤 Messaggio errore inviato all\'app');
                 } catch (wsError) {
                     console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
                 }
             }
-            throw error;
+            throw new Error('Impossibile navigare alla pagina iscrizioni dopo 3 tentativi');
         }
 
-        // Se il select non è visibile, interrompi
-        if (!selectVisibile) {
-            throw new Error('Select dei turni non visibile');
+        console.log('✅ Step 7 completato!');
+
+        // ============================================================
+        // 7.5 VERIFICA PRECOMPILAZIONE (SOLO LOG)
+        // ============================================================
+        console.log('🐛 [DEBUG] Verifico se la pagina è precompilata...');
+
+        try {
+            const isPrecompilata = await page.evaluate(() => {
+                const titolo = document.querySelector('h3.ui-accordion-header');
+                if (!titolo) return { precompilata: false, motivo: 'Nessun header trovato' };
+                
+                const testoHeader = titolo.textContent.trim();
+                const haIdGara = /\d+\s*-\s*/.test(testoHeader);
+                const selectTurno = document.querySelector('select#turno_sel');
+                const haSelect = !!selectTurno;
+                let opzioniCount = 0;
+                if (selectTurno) opzioniCount = selectTurno.options.length;
+                const haAccordionI = !!document.querySelector('#accordion_I');
+                const contieneMinerva = testoHeader.includes('MINERVA') || testoHeader.includes('TROFEO');
+                
+                const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI && contieneMinerva;
+                
+                return {
+                    precompilata: precompilata,
+                    dettagli: {
+                        header: testoHeader,
+                        haIdGara: haIdGara,
+                        haSelect: haSelect,
+                        opzioniCount: opzioniCount,
+                        haAccordionI: haAccordionI,
+                        contieneMinerva: contieneMinerva
+                    }
+                };
+            });
+
+            console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
+            console.log('📋 Dettagli:', JSON.stringify(isPrecompilata.dettagli, null, 2));
+
+            if (!isPrecompilata.precompilata) {
+                console.warn('⚠️ Attenzione: pagina NON precompilata!');
+                console.warn('📋 Dettagli mancanti:', isPrecompilata.dettagli);
+                // NON blocchiamo il flusso, solo log
+            } else {
+                console.log('✅ Pagina precompilata confermata!');
+                console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
+                console.log(`📋 Opzioni select: ${isPrecompilata.dettagli.opzioniCount}`);
+            }
+        } catch (error) {
+            console.warn('⚠️ Errore durante verifica precompilazione:', error.message);
+            // NON blocchiamo il flusso
         }
 
         // ============================================================
-        // 9. GESTISCI LO STATO DELLE ISCRIZIONI
+        // 8. APRI LA SEZIONE E LEGGI I TURNI
         // ============================================================
-        if (statoIscrizioni === 'Attive') {
-            console.log('🐛 [DEBUG] Step 11: 📋 Leggo i giorni disponibili...');
+        console.log('🐛 [DEBUG] Step 10: 🔍 Apro "Iscrizioni Gara" e leggo i turni...');
 
+        try {
+            // 1. Trova e apri la sezione "Iscrizioni Gara"
+            const sezioneAperta = await page.evaluate(() => {
+                const accordionI = document.querySelector('#accordion_I');
+                if (!accordionI) return false;
+                
+                const headers = accordionI.querySelectorAll('h3.ui-accordion-header');
+                for (const header of headers) {
+                    const text = header.textContent.trim();
+                    if (text.includes('Iscrizioni Gara')) {
+                        if (header.getAttribute('aria-expanded') !== 'true') {
+                            header.click();
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            if (!sezioneAperta) {
+                throw new Error('Impossibile trovare o aprire "Iscrizioni Gara"');
+            }
+            console.log('✅ Sezione "Iscrizioni Gara" aperta!');
+
+            // 2. Attendi che il select sia visibile
+            await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
+            console.log('✅ Select #turno_sel visibile');
+
+            // 3. LEGGI I GIORNI DISPONIBILI
+            console.log('🐛 [DEBUG] Leggo i giorni disponibili...');
+            
             let giorniDisponibili = await page.evaluate(() => {
                 const select = document.querySelector('select#turno_sel');
-                if (!select) {
-                    console.log('🐛 [DEBUG] ❌ Select #turno_sel non trovato!');
-                    return [];
-                }
-
+                if (!select) return [];
+                
                 const options = select.querySelectorAll('option');
                 const giorni = [];
                 options.forEach(opt => {
                     const testo = opt.textContent?.trim() || '';
                     const value = opt.value;
                     if (value && testo && !testo.includes('Esubero')) {
+                        const dataMatch = testo.match(/(\d{2}\/\d{2}\/\d{4})/);
+                        const data = dataMatch ? dataMatch[1] : '';
+                        const postiMatch = testo.match(/(\d+)\s*posti\s*liberi/);
+                        const postiLiberi = postiMatch ? postiMatch[1] : '0';
+                        const orarioMatch = testo.match(/\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2})/);
+                        const orario = orarioMatch ? orarioMatch[1] : '';
+                        
                         giorni.push({
                             value: value,
                             testo: testo,
-                            data: testo.match(/(\d{2}\/\d{2}\/\d{4})/)?.[1] || '',
-                            postiLiberi: testo.match(/(\d+)\s*posti\s*liberi/)?.[1] || '0'
+                            data: data,
+                            orario: orario,
+                            postiLiberi: postiLiberi
                         });
                     }
                 });
-                console.log(`🐛 [DEBUG] Trovati ${giorni.length} giorni validi`);
                 return giorni;
             });
 
-            // ✅ CONTROLLA SE NON CI SONO GIORNI DISPONIBILI
+            console.log(`📋 Trovati ${giorniDisponibili.length} giorni disponibili`);
+            giorniDisponibili.forEach(g => {
+                console.log(`  - ${g.data} ${g.orario}: ${g.postiLiberi} posti liberi`);
+            });
+
+            // Gestione esubero: se non ci sono giorni disponibili
             if (giorniDisponibili.length === 0) {
                 console.log('⚠️ Nessun giorno disponibile per questa gara');
                 if (userId) {
@@ -669,7 +597,6 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                         sendToApp(userId, 'ERRORE', {
                             message: 'Nessun giorno disponibile per questa gara'
                         });
-                        console.log('📤 Messaggio errore inviato all\'app');
                     } catch (wsError) {
                         console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
                     }
@@ -677,20 +604,19 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 throw new Error('Nessun giorno disponibile');
             }
 
-            // Controlla se ci sono turni con posti liberi
+            // Gestione esubero: controlla se ci sono turni con posti liberi
             const turniConPosti = giorniDisponibili.filter(g => parseInt(g.postiLiberi) > 0);
 
             if (turniConPosti.length === 0) {
                 console.log('⚠️ Tutti i turni sono pieni!');
-                // Aggiungi l'opzione esubero ai giorni da mostrare all'utente
                 giorniDisponibili.push({
                     value: '',
                     testo: 'Esubero senza preferenza (tutti i turni sono pieni)',
                     data: 'Esubero',
+                    orario: '',
                     postiLiberi: '0',
                     isEsubero: true
                 });
-                // Invia un messaggio speciale all'app
                 if (userId) {
                     try {
                         const { sendToApp } = await import('../services/websocketService.js');
@@ -707,16 +633,7 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 }
             }
 
-            console.log(`🐛 [DEBUG] 📊 Trovati ${giorniDisponibili.length} giorni disponibili:`);
-            giorniDisponibili.forEach(g => {
-                console.log(`🐛 [DEBUG]   - ${g.data}: ${g.postiLiberi} posti liberi (value: ${g.value})`);
-            });
-
-            // ============================================================
-            // ✅ NOVITÀ: SALVA I GIORNI E INVIA VIA WEBSOCKET
-            // ============================================================
-            
-            // 1. SALVA NEL DATABASE
+            // 4. SALVA I GIORNI NEL DATABASE
             console.log('📝 Salvo i giorni disponibili nel database...');
             await supabaseAdmin
                 .from('iscrizioni_gare')
@@ -727,7 +644,7 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 .eq('id', idIscrizione);
             console.log('✅ Giorni salvati nel database');
 
-            // 2. INVIA I GIORNI ALL'APP VIA WEBSOCKET (se non già inviato per l'esubero)
+            // 5. INVIA I GIORNI ALL'APP VIA WEBSOCKET
             if (userId && turniConPosti.length > 0) {
                 console.log(`📤 Invio giorni via WebSocket all'utente: ${userId}`);
                 try {
@@ -740,17 +657,15 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 } catch (wsError) {
                     console.log('⚠️ Errore invio WebSocket:', wsError.message);
                 }
-            } else if (!userId) {
-                console.log('⚠️ Nessun user_id trovato per l\'iscrizione');
             }
 
-            // 3. ATTENDI LA SCELTA DELL'UTENTE (POLLING DB)
+            // 6. ATTENDI LA SCELTA DELL'UTENTE
             console.log('⏳ In attesa della scelta dell\'utente (max 60 secondi)...');
             let giornoScelto = null;
-            const startTime = Date.now();
-            const maxWaitTime = 60000; // 60 secondi
+            const startTimeAttesa = Date.now();
+            const maxWaitTime = 60000;
 
-            while (Date.now() - startTime < maxWaitTime) {
+            while (Date.now() - startTimeAttesa < maxWaitTime) {
                 const { data: checkData, error: checkError } = await supabaseAdmin
                     .from('iscrizioni_gare')
                     .select('giorno_iscrizione, stato')
@@ -765,7 +680,6 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                     break;
                 }
 
-                // Attendi 1 secondo prima di ricontrollare
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
@@ -777,7 +691,6 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                         sendToApp(userId, 'ERRORE', {
                             message: 'Tempo scaduto per la selezione del giorno'
                         });
-                        console.log('📤 Messaggio timeout inviato all\'app');
                     } catch (wsError) {
                         console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
                     }
@@ -785,12 +698,8 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 throw new Error('Timeout attesa scelta utente');
             }
 
-            // ============================================================
-            // 10. SELEZIONA IL GIORNO SCELTO
-            // ============================================================
+            // 7. SELEZIONA IL GIORNO SCELTO
             console.log(`📅 Seleziono il giorno: ${giornoScelto}`);
-
-            // Cerca il value corrispondente al giorno scelto
             const giornoSelezionato = giorniDisponibili.find(g => 
                 g.data === giornoScelto || g.value === giornoScelto
             );
@@ -800,54 +709,35 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 await page.select('select#turno_sel', giornoSelezionato.value);
                 console.log('✅ Giorno selezionato!');
             } else {
-                // Se è stato scelto l'esubero (value vuoto) o un giorno non trovato
                 if (giornoScelto === 'Esubero' || giornoScelto === '') {
                     console.log('✅ Opzione esubero selezionata');
-                    // Seleziona l'opzione vuota (esubero)
                     await page.select('select#turno_sel', '');
                     console.log('✅ Esubero selezionato!');
                 } else {
-                    console.log(`⚠️ Giorno ${giornoScelto} non trovato tra quelli disponibili. Usa il primo.`);
+                    console.log(`⚠️ Giorno ${giornoScelto} non trovato. Uso il primo.`);
                     if (giorniDisponibili.length > 0) {
                         await page.select('select#turno_sel', giorniDisponibili[0].value);
-                        console.log(`✅ Selezionato il primo giorno: ${giorniDisponibili[0].data}`);
                     }
                 }
             }
 
-            // ============================================================
-            // 11. RICERCA E SELEZIONE ATLETA
-            // ============================================================
-            console.log('🐛 [DEBUG] Step 12: 🔍 Ricerca atleta...');
-            console.log(`🔍 Ricerca atleta: ${iscrizione.tesserati.cognome}`);
-
+            // 8. RICERCA ATLETA
+            console.log('🔍 Ricerca atleta...');
             try {
-                const inputAtleta = await page.waitForSelector(
-                    'input.atletaIscritto',
-                    { visible: true, timeout: 5000 }
-                );
+                const inputAtleta = await page.waitForSelector('input.atletaIscritto', { visible: true, timeout: 5000 });
                 if (inputAtleta) {
-                    console.log('🐛 [DEBUG] ✅ Campo atleta trovato!');
                     await inputAtleta.type(iscrizione.tesserati.cognome, { delay: 100 });
-                    console.log(`🐛 [DEBUG] Cognome digitato: ${iscrizione.tesserati.cognome}`);
-                    console.log('✅ Cognome digitato!');
-
-                    const lente = await page.waitForSelector(
-                        'img.elencoIscritti',
-                        { visible: true, timeout: 5000 }
-                    );
+                    console.log(`✅ Cognome digitato: ${iscrizione.tesserati.cognome}`);
+                    
+                    const lente = await page.waitForSelector('img.elencoIscritti', { visible: true, timeout: 5000 });
                     if (lente) {
-                        console.log('🐛 [DEBUG] ✅ Lente di ingrandimento trovata!');
                         await lente.click();
-                        console.log('✅ Click sulla lente di ingrandimento eseguito!');
                         await new Promise(resolve => setTimeout(resolve, 1000));
-                    } else {
-                        console.log('⚠️ Lente di ingrandimento non trovata');
                     }
-
+                    
                     try {
                         const atletaTrovato = await page.waitForSelector(
-                            'table tbody tr:first-child, .ui-menu-item, .autocomplete-item, #elencoAtleti tr:first-child',
+                            'table tbody tr:first-child, .ui-menu-item, .autocomplete-item',
                             { visible: true, timeout: 3000 }
                         );
                         if (atletaTrovato) {
@@ -855,42 +745,29 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                             console.log('✅ Atleta selezionato!');
                         }
                     } catch (e) {
-                        console.log('⚠️ Nessun atleta trovato o selezione automatica');
+                        console.log('⚠️ Nessun atleta trovato');
                     }
-                } else {
-                    console.log('⚠️ Campo atleta non trovato');
                 }
             } catch (e) {
                 console.log('⚠️ Errore ricerca atleta:', e.message);
             }
 
-            // ============================================================
-            // 12. SALVATAGGIO
-            // ============================================================
+            // 9. SALVATAGGIO
             console.log('💾 Salvataggio iscrizione...');
-
             try {
-                const btnSalva = await page.waitForSelector(
-                    'button.salvaP.show_button',
-                    { visible: true, timeout: 5000 }
-                );
+                const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
                 if (btnSalva) {
-                    console.log('🐛 [DEBUG] ✅ Pulsante "Salva" trovato!');
                     await Promise.all([
                         page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
-                        btnSalva.click(),
+                        btnSalva.click()
                     ]);
                     console.log('✅ Iscrizione salvata!');
-                } else {
-                    console.log('⚠️ Pulsante "Salva" non trovato');
                 }
             } catch (e) {
                 console.log('⚠️ Errore salvataggio:', e.message);
             }
 
-            // ============================================================
-            // 13. AGGIORNA STATO DATABASE
-            // ============================================================
+            // 10. AGGIORNA STATO DATABASE
             console.log('📝 Aggiornamento stato iscrizione...');
             await supabaseAdmin
                 .from('iscrizioni_gare')
@@ -901,7 +778,7 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                 .eq('id', idIscrizione);
             console.log('✅ Stato aggiornato a "completata"');
 
-            // ✅ NOTIFICA COMPLETAMENTO VIA WEBSOCKET
+            // 11. NOTIFICA COMPLETAMENTO
             if (userId) {
                 try {
                     const { sendToApp } = await import('../services/websocketService.js');
@@ -909,50 +786,20 @@ console.log('🐛 [DEBUG] Step 10: 🔍 Cerco il tasto "Iscrizioni Gara"...');
                         iscrizioneId: idIscrizione,
                         message: 'Iscrizione completata con successo!'
                     });
-                    console.log('📤 Notifica completamento inviata via WebSocket');
+                    console.log('📤 Notifica completamento inviata');
                 } catch (wsError) {
-                    console.log('⚠️ Errore invio notifica completamento:', wsError.message);
+                    console.log('⚠️ Errore invio notifica:', wsError.message);
                 }
             }
 
-        } else if (statoIscrizioni === 'Estrazioni') {
-            console.log('🐛 [DEBUG] ⚠️ Iscrizioni CHIUSE per questa gara.');
-            console.log('⚠️ Iscrizioni CHIUSE per questa gara.');
-            
-            // ✅ INVIA MESSAGGIO ALL'APP PRIMA DI LANCIARE L'ERRORE
-            if (userId) {
-                try {
-                    const { sendToApp } = await import('../services/websocketService.js');
-                    sendToApp(userId, 'ERRORE', {
-                        message: 'Le iscrizioni per questa gara sono chiuse'
-                    });
-                    console.log('📤 Messaggio errore inviato all\'app');
-                } catch (wsError) {
-                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                }
-            }
-            
-            throw new Error('Iscrizioni chiuse');
-        } else {
-            console.log(`🐛 [DEBUG] ❌ Stato non riconosciuto: ${statoIscrizioni}`);
-            console.log('❌ Stato non riconosciuto:', statoIscrizioni);
-            
-            // ✅ INVIA MESSAGGIO ALL'APP PER STATO NON RICONOSCIUTO
-            if (userId) {
-                try {
-                    const { sendToApp } = await import('../services/websocketService.js');
-                    sendToApp(userId, 'ERRORE', {
-                        message: `Stato iscrizioni non riconosciuto: ${statoIscrizioni}`
-                    });
-                    console.log('📤 Messaggio errore inviato all\'app');
-                } catch (wsError) {
-                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                }
-            }
-            
-            throw new Error(`Stato iscrizioni non riconosciuto: ${statoIscrizioni}`);
+        } catch (error) {
+            console.error('❌ Errore durante il processo di iscrizione:', error);
+            throw error;
         }
 
+        // ============================================================
+        // FINE - RITORNO AL MAIN
+        // ============================================================
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
         console.log(`✅ [ISCRIZIONE WORKER] Completata in ${elapsed}s`);
 
