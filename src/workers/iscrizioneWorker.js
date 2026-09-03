@@ -368,7 +368,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
         // ============================================================
 // ============================================================
-// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON SCROLL PRECISO
+// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON CLICK FISICI
 // ============================================================
 console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
@@ -382,7 +382,7 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
     console.log(`🔄 Tentativo ${tentativi}/${maxTentativi}`);
 
     try {
-        // 1. Scroll preciso fino alla riga
+        // 1. Scroll fino alla riga (come umano)
         console.log('🐛 [DEBUG] Scorro fino alla riga...');
         await page.evaluate((rowId) => {
             const row = document.querySelector(`#${rowId}`);
@@ -390,19 +390,15 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
                 row.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }, garaTrovata.id);
-        
-        // Attendi che lo scroll sia completo (1.5 secondi)
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 2. Verifica che la riga sia visibile
+        // 2. Verifica visibilità
         const isVisible = await page.evaluate((rowId) => {
             const row = document.querySelector(`#${rowId}`);
             if (!row) return false;
             const rect = row.getBoundingClientRect();
             return rect.top >= 0 && rect.bottom <= window.innerHeight;
         }, garaTrovata.id);
-
-        console.log(`📐 Riga visibile? ${isVisible}`);
 
         if (!isVisible) {
             console.log('⚠️ Riga non visibile, forzo scroll...');
@@ -417,96 +413,105 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
             await new Promise(resolve => setTimeout(resolve, 1500));
         }
 
-        // 3. Click sul centro della riga (come nel test funzionante)
-        console.log('🐛 [DEBUG] Click sul centro della riga...');
-        const clickClicked = await page.evaluate((rowId) => {
+        // 3. OTTIENI LE COORDINATE DELLA RIGA
+        const rowCoords = await page.evaluate((rowId) => {
             const row = document.querySelector(`#${rowId}`);
-            if (!row) return false;
-            
+            if (!row) return null;
             const rect = row.getBoundingClientRect();
-            const x = rect.left + rect.width / 2;
-            const y = rect.top + rect.height / 2;
-            
-            console.log(`📍 Click su centro riga: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`);
-            
-            // Eventi mouse completi (come un click umano)
-            const events = ['mousedown', 'mouseup', 'click'];
-            for (const type of events) {
-                const event = new MouseEvent(type, {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    clientX: x,
-                    clientY: y,
-                    button: 0
-                });
-                row.dispatchEvent(event);
-            }
-            return true;
+            return {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+            };
         }, garaTrovata.id);
 
-        if (!clickClicked) {
-            throw new Error('Impossibile cliccare sulla riga');
-        }
-        console.log('✅ Click eseguito!');
+        if (!rowCoords) throw new Error('Impossibile ottenere coordinate della riga');
+        console.log(`📍 Click sulla riga: X=${rowCoords.x.toFixed(0)}, Y=${rowCoords.y.toFixed(0)}`);
 
-        // 4. Attendi che il menu appaia
-        console.log('🐛 [DEBUG] Attendo il menu...');
-        await page.waitForSelector('.context-menu-list', { visible: true, timeout: 3000 });
-        console.log('✅ Menu aperto!');
+        // 4. CLICK FISICO SULLA RIGA (come umano)
+        console.log('🐛 [DEBUG] Click fisico sulla riga...');
+        await page.mouse.click(rowCoords.x, rowCoords.y, { button: 'left' });
+        console.log('✅ Click sulla riga eseguito!');
 
-        // 5. Trova e clicca su "Iscrizioni"
-        console.log('🐛 [DEBUG] Cerco voce "Iscrizioni"...');
-        const iscrizioniClicked = await page.evaluate(() => {
-            const items = document.querySelectorAll('.context-menu-item');
-            for (const item of items) {
-                const text = item.textContent.trim();
-                if (text.toLowerCase().includes('iscrizioni')) {
-                    console.log(`✅ Trovato "Iscrizioni": "${text}"`);
-                    // Clicca con eventi completi
-                    const rect = item.getBoundingClientRect();
-                    const x = rect.left + rect.width / 2;
-                    const y = rect.top + rect.height / 2;
-                    
-                    const events = ['mousedown', 'mouseup', 'click'];
-                    for (const type of events) {
-                        const event = new MouseEvent(type, {
-                            bubbles: true,
-                            cancelable: true,
-                            view: window,
-                            clientX: x,
-                            clientY: y,
-                            button: 0
-                        });
-                        item.dispatchEvent(event);
-                    }
-                    return true;
+        // 5. ATTENDI CHE IL MENU APPAIA NEL DOM
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 6. TROVA "ISCRIZIONI" NEL MENU E OTTIENI COORDINATE
+        console.log('🐛 [DEBUG] Cerco "Iscrizioni" nel menu...');
+        const iscrizioniCoords = await page.evaluate(() => {
+            // Trova il menu
+            const menu = document.querySelector('.context-menu-list');
+            if (!menu) return null;
+            
+            // Forza il menu a essere visibile per avere coordinate (ma non cliccare con jQuery!)
+            menu.style.display = 'block';
+            menu.style.visibility = 'visible';
+            menu.style.opacity = '1';
+            menu.style.position = 'fixed';
+            menu.style.left = '100px';
+            menu.style.top = '100px';
+            menu.style.zIndex = '999999';
+            
+            // Trova "Iscrizioni"
+            const items = menu.querySelectorAll('.context-menu-item');
+            let targetItem = null;
+            items.forEach(item => {
+                const text = item.textContent.trim().toLowerCase();
+                if (text.includes('iscrizioni')) {
+                    targetItem = item;
                 }
-            }
-            return false;
+            });
+            
+            if (!targetItem) return null;
+            
+            // Forza l'item a essere visibile
+            targetItem.style.display = 'block';
+            targetItem.style.visibility = 'visible';
+            targetItem.style.opacity = '1';
+            
+            // Ottieni coordinate
+            const rect = targetItem.getBoundingClientRect();
+            return {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+            };
         });
 
-        if (!iscrizioniClicked) {
-            throw new Error('Voce "Iscrizioni" non trovata nel menu');
-        }
+        if (!iscrizioniCoords) throw new Error('Impossibile trovare "Iscrizioni" nel menu');
+        console.log(`📍 Click su "Iscrizioni": X=${iscrizioniCoords.x.toFixed(0)}, Y=${iscrizioniCoords.y.toFixed(0)}`);
+
+        // 7. CLICK FISICO SU "ISCRIZIONI" (come umano)
+        console.log('🐛 [DEBUG] Click fisico su "Iscrizioni"...');
+        await page.mouse.click(iscrizioniCoords.x, iscrizioniCoords.y, { button: 'left' });
         console.log('✅ Click su "Iscrizioni" eseguito!');
 
-        // 6. Attendi la navigazione
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 });
+        // 8. ATTENDI LA NAVIGAZIONE
+        console.log('⏳ Attendo la navigazione...');
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
         navigazioneRiuscita = true;
         console.log(`✅ Navigazione riuscita al tentativo ${tentativi}`);
-        console.log(`🐛 [DEBUG] ✅ Pagina iscrizioni caricata! URL: ${page.url()}`);
-        console.log('✅ Pagina iscrizioni caricata!');
+        console.log(`📐 URL: ${page.url()}`);
+
+        // 9. VERIFICA CHE LA PAGINA SIA PRECOMPILATA
+        const hasData = await page.evaluate(() => {
+            const header = document.querySelector('h3.ui-accordion-header');
+            return !!header;
+        });
+
+        if (hasData) {
+            console.log('✅ Pagina precompilata!');
+        } else {
+            console.log('⚠️ Pagina caricata ma potrebbe essere vuota');
+        }
 
     } catch (error) {
         console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
 
         if (tentativi < maxTentativi) {
             const waitTime = 1000 * tentativi;
-            console.log(`⏳ Attendo ${waitTime}ms prima del prossimo tentativo...`);
+            console.log(`⏳ Attendo ${waitTime}ms...`);
             await new Promise(r => setTimeout(r, waitTime));
-
-            // Se il menu è aperto ma non trova "Iscrizioni", chiudi con Escape
+            
+            // Chiudi eventuali menu aperti
             await page.evaluate(() => {
                 const menu = document.querySelector('.context-menu-list');
                 if (menu) {
@@ -514,17 +519,13 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
                 }
             });
             
-            try {
-                await page.reload({ waitUntil: 'networkidle2' });
-            } catch (reloadError) {
-                console.warn('⚠️ Errore durante il reload:', reloadError.message);
-            }
+            await page.reload({ waitUntil: 'networkidle2' });
         }
     }
 }
 
 if (!navigazioneRiuscita) {
-    console.error('❌ Tutti i tentativi di navigazione sono falliti');
+    console.error('❌ Tutti i tentativi falliti');
     if (userId) {
         try {
             const { sendToApp } = await import('../services/websocketService.js');
