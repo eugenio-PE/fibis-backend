@@ -546,7 +546,75 @@ try {
 } catch (error) {
     console.warn('⚠️ Sezione iscrizioni non trovata, ma continuo...');
 }
+// ============================================================
+// 7.5 VERIFICA PRECOMPILAZIONE PAGINA
+// ============================================================
+console.log('🐛 [DEBUG] Verifico se la pagina è precompilata...');
 
+const isPrecompilata = await page.evaluate(() => {
+    // 1. Controlla se esiste il nome della gara (elemento unico della precompilata)
+    const titolo = document.querySelector('h3.ui-accordion-header');
+    if (!titolo) return { precompilata: false, motivo: 'Nessun header trovato' };
+    
+    const testoHeader = titolo.textContent.trim();
+    console.log(`📋 Header trovato: "${testoHeader}"`);
+    
+    // 2. Controlla se il titolo contiene l'ID della gara (es. "11637 - 4° TROFEO...")
+    const haIdGara = /\d+\s*-\s*/.test(testoHeader);
+    
+    // 3. Controlla se esiste il select dei turni
+    const selectTurno = document.querySelector('select#turno_sel');
+    const haSelect = !!selectTurno;
+    
+    // 4. Controlla se ci sono opzioni nel select
+    let opzioniCount = 0;
+    if (selectTurno) {
+        opzioniCount = selectTurno.options.length;
+    }
+    
+    // 5. Controlla se esiste #accordion_I
+    const accordionI = document.querySelector('#accordion_I');
+    const haAccordionI = !!accordionI;
+    
+    // 6. Controlla se il titolo contiene il nome della gara MINERVA
+    const contieneMinerva = testoHeader.includes('MINERVA') || testoHeader.includes('TROFEO');
+    
+    const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI && contieneMinerva;
+    
+    return {
+        precompilata: precompilata,
+        dettagli: {
+            header: testoHeader,
+            haIdGara: haIdGara,
+            haSelect: haSelect,
+            opzioniCount: opzioniCount,
+            haAccordionI: haAccordionI,
+            contieneMinerva: contieneMinerva
+        }
+    };
+});
+
+console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
+console.log('📋 Dettagli:', JSON.stringify(isPrecompilata.dettagli, null, 2));
+
+if (!isPrecompilata.precompilata) {
+    console.error('❌ Pagina NON precompilata!');
+    console.log('📋 Dettagli mancanti:', isPrecompilata.dettagli);
+    
+    // Fai uno screenshot per debug
+    try {
+        await page.screenshot({ path: `logs/debug_${idIscrizione}_non_precompilata.png` });
+        console.log('📸 Screenshot salvato: non_precompilata.png');
+    } catch (e) {
+        console.log('⚠️ Impossibile salvare screenshot:', e.message);
+    }
+    
+    throw new Error('Pagina iscrizioni non precompilata correttamente');
+}
+
+console.log('✅ Pagina precompilata confermata!');
+console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
+console.log(`📋 Opzioni select: ${isPrecompilata.dettagli.opzioniCount}`);
 // ============================================================
 // 8. CERCA IL TASTO "ISCRIZIONI GARA"
 // ============================================================
