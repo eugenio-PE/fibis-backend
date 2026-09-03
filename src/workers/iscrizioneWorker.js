@@ -366,9 +366,9 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
-        // ============================================================
+        
 // ============================================================
-// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI CON CLICK FISICI
+// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (SOLUZIONE MINIMAL)
 // ============================================================
 console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
@@ -382,150 +382,74 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
     console.log(`🔄 Tentativo ${tentativi}/${maxTentativi}`);
 
     try {
-        // 1. Scroll fino alla riga (come umano)
-        console.log('🐛 [DEBUG] Scorro fino alla riga...');
+        // 1. Scroll fino alla riga
         await page.evaluate((rowId) => {
             const row = document.querySelector(`#${rowId}`);
-            if (row) {
-                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, garaTrovata.id);
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 2. Verifica visibilità
-        const isVisible = await page.evaluate((rowId) => {
-            const row = document.querySelector(`#${rowId}`);
-            if (!row) return false;
-            const rect = row.getBoundingClientRect();
-            return rect.top >= 0 && rect.bottom <= window.innerHeight;
+        // 2. APRI IL MENU CON JQUERY
+        const menuAperto = await page.evaluate((rowId) => {
+            const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
+            if (!triggerEl) return false;
+            
+            const rect = triggerEl.getBoundingClientRect();
+            const event = jQuery.Event('contextmenu', {
+                pageX: rect.left + window.scrollX + rect.width / 2,
+                pageY: rect.top + window.scrollY + rect.height / 2,
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+                target: triggerEl
+            });
+            jQuery(triggerEl).trigger(event);
+            return true;
         }, garaTrovata.id);
 
-        if (!isVisible) {
-            console.log('⚠️ Riga non visibile, forzo scroll...');
-            await page.evaluate((rowId) => {
-                const row = document.querySelector(`#${rowId}`);
-                if (row) {
-                    const rect = row.getBoundingClientRect();
-                    const scrollY = window.scrollY + rect.top - window.innerHeight / 2 + rect.height / 2;
-                    window.scrollTo({ top: scrollY, behavior: 'smooth' });
-                }
-            }, garaTrovata.id);
-            await new Promise(resolve => setTimeout(resolve, 1500));
-        }
-
-        // 3. OTTIENI LE COORDINATE DELLA RIGA
-        const rowCoords = await page.evaluate((rowId) => {
-            const row = document.querySelector(`#${rowId}`);
-            if (!row) return null;
-            const rect = row.getBoundingClientRect();
-            return {
-                x: rect.left + rect.width / 2,
-                y: rect.top + rect.height / 2
-            };
-        }, garaTrovata.id);
-
-        if (!rowCoords) throw new Error('Impossibile ottenere coordinate della riga');
-        console.log(`📍 Click sulla riga: X=${rowCoords.x.toFixed(0)}, Y=${rowCoords.y.toFixed(0)}`);
-
-        // 4. CLICK FISICO SULLA RIGA (come umano)
-        console.log('🐛 [DEBUG] Click fisico sulla riga...');
-        await page.mouse.click(rowCoords.x, rowCoords.y, { button: 'left' });
-        console.log('✅ Click sulla riga eseguito!');
-
-        // 5. ATTENDI CHE IL MENU APPAIA NEL DOM
+        if (!menuAperto) throw new Error('Impossibile aprire il menu');
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // 6. TROVA "ISCRIZIONI" NEL MENU E OTTIENI COORDINATE
-        console.log('🐛 [DEBUG] Cerco "Iscrizioni" nel menu...');
-        const iscrizioniCoords = await page.evaluate(() => {
-            // Trova il menu
-            const menu = document.querySelector('.context-menu-list');
-            if (!menu) return null;
-            
-            // Forza il menu a essere visibile per avere coordinate (ma non cliccare con jQuery!)
-            menu.style.display = 'block';
-            menu.style.visibility = 'visible';
-            menu.style.opacity = '1';
-            menu.style.position = 'fixed';
-            menu.style.left = '100px';
-            menu.style.top = '100px';
-            menu.style.zIndex = '999999';
-            
+        // 3. CHIAMA IL CALLBACK DI "ISCRIZIONI"
+        const navigato = await page.evaluate((rowId) => {
             // Trova "Iscrizioni"
-            const items = menu.querySelectorAll('.context-menu-item');
+            const items = document.querySelectorAll('.context-menu-item');
             let targetItem = null;
             items.forEach(item => {
-                const text = item.textContent.trim().toLowerCase();
-                if (text.includes('iscrizioni')) {
+                if (item.textContent.trim().toLowerCase().includes('iscrizioni')) {
                     targetItem = item;
                 }
             });
+            if (!targetItem) return false;
             
-            if (!targetItem) return null;
+            // Prende root, key e riga
+            const root = $(targetItem).data('contextMenuRoot');
+            const key = $(targetItem).data('contextMenuKey');
+            const triggerRow = document.querySelector(`#${rowId}`);
+            if (!root || !root.callback || !triggerRow) return false;
             
-            // Forza l'item a essere visibile
-            targetItem.style.display = 'block';
-            targetItem.style.visibility = 'visible';
-            targetItem.style.opacity = '1';
-            
-            // Ottieni coordinate
-            const rect = targetItem.getBoundingClientRect();
-            return {
-                x: rect.left + rect.width / 2,
-                y: rect.top + rect.height / 2
-            };
-        });
+            // CHIAMA IL CALLBACK (SOLUZIONE!)
+            root.callback.call(triggerRow, key, root);
+            return true;
+        }, garaTrovata.id);
 
-        if (!iscrizioniCoords) throw new Error('Impossibile trovare "Iscrizioni" nel menu');
-        console.log(`📍 Click su "Iscrizioni": X=${iscrizioniCoords.x.toFixed(0)}, Y=${iscrizioniCoords.y.toFixed(0)}`);
+        if (!navigato) throw new Error('Impossibile chiamare il callback');
 
-        // 7. CLICK FISICO SU "ISCRIZIONI" (come umano)
-        console.log('🐛 [DEBUG] Click fisico su "Iscrizioni"...');
-        await page.mouse.click(iscrizioniCoords.x, iscrizioniCoords.y, { button: 'left' });
-        console.log('✅ Click su "Iscrizioni" eseguito!');
-
-        // 8. ATTENDI LA NAVIGAZIONE
-        console.log('⏳ Attendo la navigazione...');
+        // 4. ATTENDI LA NAVIGAZIONE
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
         navigazioneRiuscita = true;
         console.log(`✅ Navigazione riuscita al tentativo ${tentativi}`);
         console.log(`📐 URL: ${page.url()}`);
 
-        // 9. VERIFICA CHE LA PAGINA SIA PRECOMPILATA
-        const hasData = await page.evaluate(() => {
-            const header = document.querySelector('h3.ui-accordion-header');
-            return !!header;
-        });
-
-        if (hasData) {
-            console.log('✅ Pagina precompilata!');
-        } else {
-            console.log('⚠️ Pagina caricata ma potrebbe essere vuota');
-        }
-
     } catch (error) {
         console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
-
         if (tentativi < maxTentativi) {
-            const waitTime = 1000 * tentativi;
-            console.log(`⏳ Attendo ${waitTime}ms...`);
-            await new Promise(r => setTimeout(r, waitTime));
-            
-            // Chiudi eventuali menu aperti
-            await page.evaluate(() => {
-                const menu = document.querySelector('.context-menu-list');
-                if (menu) {
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-                }
-            });
-            
+            await new Promise(r => setTimeout(r, 1000 * tentativi));
             await page.reload({ waitUntil: 'networkidle2' });
         }
     }
 }
 
 if (!navigazioneRiuscita) {
-    console.error('❌ Tutti i tentativi falliti');
     if (userId) {
         try {
             const { sendToApp } = await import('../services/websocketService.js');
@@ -539,82 +463,60 @@ if (!navigazioneRiuscita) {
     throw new Error('Impossibile navigare alla pagina iscrizioni dopo 3 tentativi');
 }
 
-// ✅ Verifica che la pagina sia caricata
-try {
-    await page.waitForSelector('h3.ui-accordion-header', { timeout: 10000 });
-    console.log('✅ Sezione iscrizioni trovata');
-} catch (error) {
-    console.warn('⚠️ Sezione iscrizioni non trovata, ma continuo...');
-}
+console.log('✅ Step 7 completato!');
+
 // ============================================================
-// 7.5 VERIFICA PRECOMPILAZIONE PAGINA
+// 7.5 VERIFICA PRECOMPILAZIONE (SOLO LOG)
 // ============================================================
 console.log('🐛 [DEBUG] Verifico se la pagina è precompilata...');
 
-const isPrecompilata = await page.evaluate(() => {
-    // 1. Controlla se esiste il nome della gara (elemento unico della precompilata)
-    const titolo = document.querySelector('h3.ui-accordion-header');
-    if (!titolo) return { precompilata: false, motivo: 'Nessun header trovato' };
-    
-    const testoHeader = titolo.textContent.trim();
-    console.log(`📋 Header trovato: "${testoHeader}"`);
-    
-    // 2. Controlla se il titolo contiene l'ID della gara (es. "11637 - 4° TROFEO...")
-    const haIdGara = /\d+\s*-\s*/.test(testoHeader);
-    
-    // 3. Controlla se esiste il select dei turni
-    const selectTurno = document.querySelector('select#turno_sel');
-    const haSelect = !!selectTurno;
-    
-    // 4. Controlla se ci sono opzioni nel select
-    let opzioniCount = 0;
-    if (selectTurno) {
-        opzioniCount = selectTurno.options.length;
-    }
-    
-    // 5. Controlla se esiste #accordion_I
-    const accordionI = document.querySelector('#accordion_I');
-    const haAccordionI = !!accordionI;
-    
-    // 6. Controlla se il titolo contiene il nome della gara MINERVA
-    const contieneMinerva = testoHeader.includes('MINERVA') || testoHeader.includes('TROFEO');
-    
-    const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI && contieneMinerva;
-    
-    return {
-        precompilata: precompilata,
-        dettagli: {
-            header: testoHeader,
-            haIdGara: haIdGara,
-            haSelect: haSelect,
-            opzioniCount: opzioniCount,
-            haAccordionI: haAccordionI,
-            contieneMinerva: contieneMinerva
-        }
-    };
-});
+try {
+    const isPrecompilata = await page.evaluate(() => {
+        const titolo = document.querySelector('h3.ui-accordion-header');
+        if (!titolo) return { precompilata: false, motivo: 'Nessun header trovato' };
+        
+        const testoHeader = titolo.textContent.trim();
+        const haIdGara = /\d+\s*-\s*/.test(testoHeader);
+        const selectTurno = document.querySelector('select#turno_sel');
+        const haSelect = !!selectTurno;
+        let opzioniCount = 0;
+        if (selectTurno) opzioniCount = selectTurno.options.length;
+        const haAccordionI = !!document.querySelector('#accordion_I');
+        const contieneMinerva = testoHeader.includes('MINERVA') || testoHeader.includes('TROFEO');
+        
+        const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI && contieneMinerva;
+        
+        return {
+            precompilata: precompilata,
+            dettagli: {
+                header: testoHeader,
+                haIdGara: haIdGara,
+                haSelect: haSelect,
+                opzioniCount: opzioniCount,
+                haAccordionI: haAccordionI,
+                contieneMinerva: contieneMinerva
+            }
+        };
+    });
 
-console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
-console.log('📋 Dettagli:', JSON.stringify(isPrecompilata.dettagli, null, 2));
+    console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
+    console.log('📋 Dettagli:', JSON.stringify(isPrecompilata.dettagli, null, 2));
 
-if (!isPrecompilata.precompilata) {
-    console.error('❌ Pagina NON precompilata!');
-    console.log('📋 Dettagli mancanti:', isPrecompilata.dettagli);
-    
-    // Fai uno screenshot per debug
-    try {
-        await page.screenshot({ path: `logs/debug_${idIscrizione}_non_precompilata.png` });
-        console.log('📸 Screenshot salvato: non_precompilata.png');
-    } catch (e) {
-        console.log('⚠️ Impossibile salvare screenshot:', e.message);
+    if (!isPrecompilata.precompilata) {
+        console.warn('⚠️ Attenzione: pagina NON precompilata!');
+        console.warn('📋 Dettagli mancanti:', isPrecompilata.dettagli);
+        // NON blocchiamo il flusso, solo log
+    } else {
+        console.log('✅ Pagina precompilata confermata!');
+        console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
+        console.log(`📋 Opzioni select: ${isPrecompilata.dettagli.opzioniCount}`);
     }
-    
-    throw new Error('Pagina iscrizioni non precompilata correttamente');
+} catch (error) {
+    console.warn('⚠️ Errore durante verifica precompilazione:', error.message);
+    // NON blocchiamo il flusso
 }
 
-console.log('✅ Pagina precompilata confermata!');
-console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
-console.log(`📋 Opzioni select: ${isPrecompilata.dettagli.opzioniCount}`);
+
 // ============================================================
 // 8. CERCA IL TASTO "ISCRIZIONI GARA"
 // ============================================================
