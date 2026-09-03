@@ -366,7 +366,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
-        
 // ============================================================
 // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (SOLUZIONE MINIMAL)
 // ============================================================
@@ -409,8 +408,24 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
         if (!menuAperto) throw new Error('Impossibile aprire il menu');
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // 3. CHIAMA IL CALLBACK DI "ISCRIZIONI"
-        const navigato = await page.evaluate((rowId) => {
+        // 2.5. ESTRAI L'ID NUMERICO DALLA RIGA
+        console.log('🐛 [DEBUG] Estraggo ID numerico della gara...');
+        const idNumerico = await page.evaluate((rowId) => {
+            const row = document.querySelector(`#${rowId}`);
+            if (!row) return null;
+            const text = row.textContent;
+            // Cerca il numero all'inizio della riga (es. "11637")
+            const match = text.match(/\b(\d{5})\b/);
+            return match ? match[1] : null;
+        }, garaTrovata.id);
+
+        if (!idNumerico) {
+            throw new Error('Impossibile estrarre ID numerico dalla riga');
+        }
+        console.log(`🔑 ID numerico: ${idNumerico}`);
+
+        // 3. CHIAMA IL CALLBACK CON L'ID NUMERICO
+        const navigato = await page.evaluate((rowId, idNumerico) => {
             // Trova "Iscrizioni"
             const items = document.querySelectorAll('.context-menu-item');
             let targetItem = null;
@@ -427,10 +442,18 @@ while (tentativi < maxTentativi && !navigazioneRiuscita) {
             const triggerRow = document.querySelector(`#${rowId}`);
             if (!root || !root.callback || !triggerRow) return false;
             
-            // CHIAMA IL CALLBACK (SOLUZIONE!)
+            // ✅ SOLUZIONE: sovrascrivi l'ID della riga con l'ID numerico
+            const originalId = triggerRow.id;
+            triggerRow.id = idNumerico;
+            
+            // CHIAMA IL CALLBACK
             root.callback.call(triggerRow, key, root);
+            
+            // Ripristina l'ID originale
+            triggerRow.id = originalId;
+            
             return true;
-        }, garaTrovata.id);
+        }, garaTrovata.id, idNumerico);
 
         if (!navigato) throw new Error('Impossibile chiamare il callback');
 
