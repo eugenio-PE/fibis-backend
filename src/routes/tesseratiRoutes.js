@@ -2,6 +2,7 @@ import express from 'express';
 import {
     getTesserati,
     getTesseratoById,
+    getTesseratoByUserId,  // ← AGGIUNGI QUESTO IMPORT
     createTesserato,
     updateTesserato,
     deleteTesserato,
@@ -19,6 +20,9 @@ router.get('/', authenticate, getTesserati);
 
 // Rotta per ottenere un singolo tesserato (GET)
 router.get('/:id', authenticate, getTesseratoById);
+
+// Rotta per ottenere un tesserato per ID utente (GET)
+router.get('/user/:userId', authenticate, getTesseratoByUserId);
 
 // Rotta per creare un nuovo tesserato (POST)
 router.post('/', authenticate, requireRole(['admin', 'presidente']), createTesserato);

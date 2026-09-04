@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import http from 'http'; // ← NUOVO
+import http from 'http';
 
 // ✅ CARICA LE VARIABILI D'AMBIENTE SUBITO
 dotenv.config();
@@ -48,7 +48,9 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// ROUTES - collegate correttamente
+// ============================================================
+// ROUTES - tutte collegate correttamente
+// ============================================================
 app.use('/api/auth', authRoutes);
 app.use('/api', interventoRoutes);
 app.use('/api', adminRoutes);
@@ -59,7 +61,10 @@ app.use('/api/presidenti', credenzialiRoutes);
 app.use('/api/notifiche', notificationRoutes);
 app.use('/api/comunicati', comunicatiRoutes);
 app.use('/api/iscrizioni', iscrizioniRoutes);
-// Health check (sempre accessibile)
+
+// ============================================================
+// HEALTH CHECK
+// ============================================================
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -68,7 +73,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ROTTA DI FALLBACK per test
+// ============================================================
+// ROTTA DI FALLBACK PER TEST LOGIN
+// ============================================================
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -107,4 +114,15 @@ initWebSocketServer(server);
 server.listen(PORT, () => {
   console.log(`🚀 Server avviato su http://localhost:${PORT}`);
   console.log(`🔌 WebSocket Server attivo su /ws`);
+});
+
+// ============================================================
+// ✅ GESTIONE ERRORI GLOBALI
+// ============================================================
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
 });

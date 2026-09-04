@@ -534,3 +534,35 @@ export const uploadLogo = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+// ============================================================
+// 🔥 NUOVA FUNZIONE: GET /api/tesserati/user/:userId
+// Recupera tesserato tramite user_id
+// ============================================================
+export const getTesseratoByUserId = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        console.log(`🔵 getTesseratoByUserId - userId: ${userId}`);
+
+        const { data, error } = await supabaseAdmin
+            .from('tesserati')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (error) {
+            console.error('❌ Errore getTesseratoByUserId:', error);
+            return res.status(500).json({ error: error.message });
+        }
+
+        if (!data) {
+            return res.status(404).json({ error: 'Tesserato non trovato per questo utente' });
+        }
+
+        console.log(`✅ Tesserato trovato: ${data.id}`);
+        res.json(data);
+    } catch (error) {
+        console.error('❌ Errore getTesseratoByUserId:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
