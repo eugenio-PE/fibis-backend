@@ -9,6 +9,8 @@ dotenv.config();
 // CONFIGURAZIONE
 // ============================================================
 const PORTALE_URL = 'https://tesseramento.fibis.it';
+const MAX_TENTATIVI = 3;
+const TIMEOUT_ATTESA = 30000;
 
 // ============================================================
 // FUNZIONE DI UTILITY PER INVIARE MESSAGGI WEBSOCKET
@@ -42,11 +44,11 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
     });
     const page = await browser.newPage();
 
-    // ✅ Aggiungi il debug dei log della pagina
     page.on('console', msg => console.log('🐛 [PAGE LOG]:', msg.text()));
 
     let iscrizione = null;
     let userId = null;
+    let ultimoErrore = null;
 
     try {
         // 1. Recupera i dati dell'iscrizione dal database
@@ -66,14 +68,12 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         
         iscrizione = iscrizioneData;
         
-        // ✅ AGGIUNGI: se userIdFromClient è passato, aggiorna user_id
         if (userIdFromClient && !iscrizione.user_id) {
             await supabaseAdmin
                 .from('iscrizioni_gare')
                 .update({ user_id: userIdFromClient })
                 .eq('id', idIscrizione);
             console.log(`✅ user_id aggiornato: ${userIdFromClient}`);
-            // Ricarica l'iscrizione per avere il nuovo user_id
             const { data: updatedIscrizione } = await supabaseAdmin
                 .from('iscrizioni_gare')
                 .select(`*, gare (*), tesserati (*)`)
@@ -82,7 +82,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             iscrizione = updatedIscrizione;
         }
         
-        // ✅ IMPOSTA userId per i messaggi WebSocket
         userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
         
         console.log(`📋 Iscrizione: ${iscrizione.id}`);
@@ -90,7 +89,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
         console.log(`  - Giorno: ${iscrizione.giorno_iscrizione}`);
 
-        // 2. RECUPERA L'ASD DEL TESSERATO (non della gara!)
+        // 2. RECUPERA L'ASD DEL TESSERATO
         const { data: tesserato, error: tesseratoError } = await supabaseAdmin
             .from('tesserati')
             .select('asd_id')
@@ -117,170 +116,211 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             throw new Error(`Presidente non trovato per ASD: ${tesserato.asd_id}`);
         }
 
-        // Recupera le credenziali del presidente (decifrate)
         const credenziali = await getCredenzialiPerPuppeteer(presidente.id);
         console.log(`🔑 Credenziali recuperate per: ${credenziali.username}`);
 
-        // ✅ Imposta viewport e User-Agent reali
         await page.setViewport({ width: 1920, height: 1080 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
         // ============================================================
-        // 1. LOGIN
+        // 1. LOGIN (CON RETRY)
         // ============================================================
-        console.log('🐛 [DEBUG] Step 1: 🌐 Navigazione al portale...');
-        await page.goto(PORTALE_URL, {
-            waitUntil: 'networkidle2',
-            timeout: 30000
-        });
-        console.log(`🐛 [DEBUG] ✅ URL caricato: ${page.url()}`);
-
-        console.log('🐛 [DEBUG] Step 2: 👤 Inserimento credenziali...');
-        const usernameField = await page.$('#edit-name');
-        console.log(`🐛 [DEBUG] Campo username trovato: ${!!usernameField}`);
-        await page.type('#edit-name', credenziali.username);
+        console.log('🐛 [DEBUG] Step 1-3: 🔐 Login con retry...');
+        let loginRiuscito = false;
         
-        const passwordField = await page.$('#edit-pass');
-        console.log(`🐛 [DEBUG] Campo password trovato: ${!!passwordField}`);
-        await page.type('#edit-pass', credenziali.password);
-        
-        const submitButton = await page.$('#edit-submit-1');
-        console.log(`🐛 [DEBUG] Pulsante submit trovato: ${!!submitButton}`);
-        await page.click('#edit-submit-1');
+        for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+            try {
+                console.log(`🔄 Tentativo login ${tentativo}/${MAX_TENTATIVI}`);
+                
+                await page.goto(PORTALE_URL, {
+                    waitUntil: 'networkidle2',
+                    timeout: TIMEOUT_ATTESA
+                });
+                console.log(`🐛 [DEBUG] ✅ URL caricato: ${page.url()}`);
 
-        console.log('🐛 [DEBUG] Step 3: ⏳ Attesa login...');
-        await page.waitForNavigation({
-            waitUntil: 'networkidle2',
-            timeout: 30000
-        });
-        console.log(`🐛 [DEBUG] ✅ Login completato! URL attuale: ${page.url()}`);
-        console.log('✅ Login completato!');
+                await page.type('#edit-name', credenziali.username);
+                await page.type('#edit-pass', credenziali.password);
+                await page.click('#edit-submit-1');
 
-        // ============================================================
-        // 2. GESTIONALE SPORTIVO
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo...');
-        console.log('🐛 [DEBUG] Cerco link a.expandfirst[href*="GS"]...');
-
-        const gestionaleClicked = await page.evaluate(() => {
-            const link = document.querySelector('a.expandfirst[href*="GS"]');
-            if (link) {
-                console.log(`🐛 [DEBUG] Link trovato: ${link.href}`);
-                link.click();
-                return true;
-            }
-            console.log('🐛 [DEBUG] ❌ Link NON TROVATO!');
-            return false;
-        });
-
-        if (!gestionaleClicked) {
-            throw new Error('Impossibile trovare il link "Gestionale sportivo"');
-        }
-        console.log('🐛 [DEBUG] ✅ "Gestionale sportivo" cliccato!');
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        console.log(`🐛 [DEBUG] URL dopo navigation: ${page.url()}`);
-        console.log('✅ "Gestionale sportivo" cliccato!');
-
-        // ============================================================
-        // 3. SELEZIONE DISCIPLINA "STECCA"
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 5: 🔍 Selezione disciplina: STECCA...');
-
-        const steccaClicked = await page.evaluate(() => {
-            const buttons = document.querySelectorAll('button.dtUP_sett');
-            console.log(`🐛 [DEBUG] Trovati ${buttons.length} pulsanti disciplina`);
-            for (const btn of buttons) {
-                const text = btn.textContent?.trim();
-                console.log(`🐛 [DEBUG] Pulsante trovato: "${text}"`);
-                if (text === 'STECCA') {
-                    console.log('🐛 [DEBUG] ✅ Trovato pulsante STECCA! Click...');
-                    btn.click();
-                    return true;
+                await page.waitForNavigation({
+                    waitUntil: 'networkidle2',
+                    timeout: TIMEOUT_ATTESA
+                });
+                
+                const urlCorrente = page.url();
+                if (urlCorrente.includes('bacheca') || urlCorrente.includes('GS')) {
+                    loginRiuscito = true;
+                    console.log(`✅ Login riuscito al tentativo ${tentativo}`);
+                    break;
+                }
+            } catch (error) {
+                ultimoErrore = error.message;
+                console.log(`⚠️ Tentativo login ${tentativo} fallito:`, error.message);
+                if (tentativo < MAX_TENTATIVI) {
+                    await new Promise(r => setTimeout(r, 2000 * tentativo));
                 }
             }
-            console.log('🐛 [DEBUG] ❌ Pulsante STECCA NON TROVATO!');
-            return false;
-        });
-
-        if (!steccaClicked) {
-            throw new Error('Impossibile trovare il pulsante "STECCA"');
         }
-        console.log('🐛 [DEBUG] ✅ "STECCA" selezionata!');
-        console.log('✅ "STECCA" selezionata!');
-        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        if (!loginRiuscito) {
+            const msg = `Login fallito dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+            if (userId) {
+                await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+            }
+            throw new Error(msg);
+        }
+
+        // ============================================================
+        // 2. GESTIONALE SPORTIVO (CON RETRY)
+        // ============================================================
+        console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo con retry...');
+        let gestionaleRiuscito = false;
+        
+        for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+            try {
+                console.log(`🔄 Tentativo gestionale ${tentativo}/${MAX_TENTATIVI}`);
+                
+                const gestionaleClicked = await page.evaluate(() => {
+                    const link = document.querySelector('a.expandfirst[href*="GS"]');
+                    if (link) {
+                        link.click();
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (!gestionaleClicked) {
+                    throw new Error('Link "Gestionale sportivo" non trovato');
+                }
+
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA });
+                const urlCorrente = page.url();
+                if (urlCorrente.includes('/GS')) {
+                    gestionaleRiuscito = true;
+                    console.log(`✅ Gestionale sportivo riuscito al tentativo ${tentativo}`);
+                    break;
+                }
+            } catch (error) {
+                ultimoErrore = error.message;
+                console.log(`⚠️ Tentativo gestionale ${tentativo} fallito:`, error.message);
+                if (tentativo < MAX_TENTATIVI) {
+                    await new Promise(r => setTimeout(r, 2000 * tentativo));
+                    await page.goto(PORTALE_URL + '/bacheca', { waitUntil: 'networkidle2' });
+                }
+            }
+        }
+
+        if (!gestionaleRiuscito) {
+            const msg = `Impossibile aprire Gestionale sportivo dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+            if (userId) {
+                await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+            }
+            throw new Error(msg);
+        }
+
+        // ============================================================
+        // 3. SELEZIONE DISCIPLINA "STECCA" (CON RETRY)
+        // ============================================================
+        console.log('🐛 [DEBUG] Step 5: 🔍 Selezione disciplina STECCA con retry...');
+        let steccaRiuscita = false;
+        
+        for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+            try {
+                console.log(`🔄 Tentativo STECCA ${tentativo}/${MAX_TENTATIVI}`);
+                
+                const steccaClicked = await page.evaluate(() => {
+                    const buttons = document.querySelectorAll('button.dtUP_sett');
+                    for (const btn of buttons) {
+                        if (btn.textContent?.trim() === 'STECCA') {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (steccaClicked) {
+                    steccaRiuscita = true;
+                    console.log(`✅ STECCA selezionata al tentativo ${tentativo}`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    break;
+                }
+                throw new Error('Pulsante STECCA non trovato');
+            } catch (error) {
+                ultimoErrore = error.message;
+                console.log(`⚠️ Tentativo STECCA ${tentativo} fallito:`, error.message);
+                if (tentativo < MAX_TENTATIVI) {
+                    await new Promise(r => setTimeout(r, 2000 * tentativo));
+                    await page.reload({ waitUntil: 'networkidle2' });
+                }
+            }
+        }
+
+        if (!steccaRiuscita) {
+            const msg = `Impossibile selezionare STECCA dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+            if (userId) {
+                await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+            }
+            throw new Error(msg);
+        }
 
         // ============================================================
         // 4. IMPOSTA FILTRI (DINAMICI)
         // ============================================================
         console.log('🐛 [DEBUG] Step 6: 🔧 Impostazione filtri...');
 
-        // 🔹 1. RECUPERA INFO DAL DATABASE (case-insensitive)
         const tipologia = iscrizione.gare.tipologia?.toLowerCase();
         const regione = iscrizione.gare.regione;
 
-        // 🔹 2. FILTRI DI BASE (validi per tutti)
         const filters = {
-            'siNo_eventiFuturi_f': '1',        // Solo eventi futuri
-            'statoApprovazione_f': '999',      // Tutti gli stati
-            'classeevento_f': '0',             // Tutti i livelli
-            'stagione_f': '2026',              // Stagione corrente
-            'desOrganizzatore_f': '0',         // Default: nessun filtro
-            'siNo_attivitaBase_f': '2',        // Default: No
-            'siNo_eventiInteresse_f': '2',     // Default: No
+            'siNo_eventiFuturi_f': '1',
+            'statoApprovazione_f': '999',
+            'classeevento_f': '0',
+            'stagione_f': '2026',
+            'desOrganizzatore_f': '0',
+            'siNo_attivitaBase_f': '2',
+            'siNo_eventiInteresse_f': '2',
         };
 
-        // 🔹 3. FILTRI IN BASE ALLA TIPOLOGIA (case-insensitive)
         if (tipologia === 'istituzionale' || tipologia === 'riservata') {
-            // Istituzionale/Riservata → filtro per regione + attività di base
             filters['desOrganizzatore_f'] = `C.R. ${regione.toUpperCase()}`;
-            filters['siNo_attivitaBase_f'] = '1';  // Sì (attività di base)
+            filters['siNo_attivitaBase_f'] = '1';
             console.log(`📌 Tipologia ${tipologia}: filtro per regione ${regione}`);
         } else if (tipologia === 'fibis challenge') {
-            // Fibis Challenge → nazionale (nessun filtro regione)
             filters['desOrganizzatore_f'] = 'FISBB NAZIONALE';
-            filters['siNo_attivitaBase_f'] = '0';  // No
+            filters['siNo_attivitaBase_f'] = '0';
             console.log('📌 Tipologia Fibis Challenge: filtro nazionale');
         } else if (tipologia === 'libera') {
-            // Libera → filtro per regione + attività di base NO
             filters['desOrganizzatore_f'] = `C.R. ${regione.toUpperCase()}`;
-            filters['siNo_attivitaBase_f'] = '0';  // No
+            filters['siNo_attivitaBase_f'] = '0';
             console.log(`📌 Tipologia Libera: filtro per regione ${regione}`);
         } else {
-            // Fallback: se tipologia non riconosciuta, usa filtri base
             console.log(`⚠️ Tipologia non riconosciuta: "${tipologia}", uso filtri base`);
         }
 
-        // 🔹 4. IMPOSTA FILTRI NEL BROWSER
         const filtersSet = await page.evaluate((filters) => {
             let count = 0;
             const results = [];
             Object.keys(filters).forEach(name => {
                 const select = document.querySelector(`select[name="${name}"]`);
                 if (select) {
-                    const oldValue = select.value;
                     select.value = filters[name];
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                     count++;
-                    results.push({ name, oldValue, newValue: filters[name] });
-                } else {
-                    console.log(`🐛 [DEBUG] ❌ Filtro ${name} NON TROVATO!`);
+                    results.push({ name, newValue: filters[name] });
                 }
             });
             return { count, results };
         }, filters);
 
         console.log(`✅ ${filtersSet.count} filtri impostati`);
-        console.log('📊 Dettaglio filtri:', filtersSet.results);
-        // 🔹 5. IMPOSTA VISUALIZZAZIONE 100 ELEMENTI
-        console.log('🐛 [DEBUG] Imposto visualizzazione 100 elementi...');
+
         await page.evaluate(() => {
             const select = document.querySelector('select[name="eventiDT_length"]');
             if (select) {
                 select.value = '100';
                 select.dispatchEvent(new Event('change', { bubbles: true }));
-                return true;
             }
-            return false;
         });
         console.log('✅ Visualizzazione 100 elementi impostata');
 
@@ -289,11 +329,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         // ============================================================
         console.log('🐛 [DEBUG] Step 7: ⏳ Attesa aggiornamento lista gare...');
         await page.waitForSelector('#eventiDT tbody tr', { timeout: 15000 });
-        console.log('🐛 [DEBUG] ✅ Lista gare aggiornata!');
         console.log('✅ Lista gare aggiornata!');
 
         // ============================================================
-        // 6. CERCA LA GARA NELLA LISTA (CON waitForFunction)
+        // 6. CERCA LA GARA NELLA LISTA (CON FALLBACK)
         // ============================================================
         console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
 
@@ -301,7 +340,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         let garaTrovata = null;
 
         try {
-            // Attendi che la gara appaia nella tabella
             await page.waitForFunction(
                 (nomeGara) => {
                     const rows = document.querySelectorAll('#eventiDT tbody tr');
@@ -311,7 +349,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 iscrizione.gare.nome
             );
 
-            // Estrai i dati
             garaTrovata = await page.evaluate((nomeGara) => {
                 const rows = document.querySelectorAll('#eventiDT tbody tr');
                 for (const row of rows) {
@@ -324,25 +361,19 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
             console.log(`✅ Gara trovata! ID riga: ${garaTrovata?.id}`);
 
-            // FALLBACK: se non trovata, prova a rimuovere il filtro regione
             if (!garaTrovata) {
                 console.log('⚠️ Gara non trovata con i filtri attuali. Provo senza filtro regione...');
                 
-                // Rimuovi il filtro regione (desOrganizzatore_f = 0)
                 await page.evaluate(() => {
                     const select = document.querySelector('select[name="desOrganizzatore_f"]');
                     if (select) {
                         select.value = '0';
                         select.dispatchEvent(new Event('change', { bubbles: true }));
-                        return true;
                     }
-                    return false;
                 });
                 
-                // Attendine il ricaricamento
                 await page.waitForSelector('#eventiDT tbody tr', { timeout: 10000 });
                 
-                // Riprova a cercare con waitForFunction
                 await page.waitForFunction(
                     (nomeGara) => {
                         const rows = document.querySelectorAll('#eventiDT tbody tr');
@@ -364,18 +395,22 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
                 if (garaTrovataFallback) {
                     console.log(`✅ Gara trovata (fallback)! ID riga: ${garaTrovataFallback.id}`);
-                    garaTrovata = garaTrovataFallback;
+                    Object.assign(garaTrovata, garaTrovataFallback);
                 }
             }
 
             if (!garaTrovata) {
+                if (userId) {
+                    await sendWebSocketMessage(userId, 'ERRORE', {
+                        message: `Gara non trovata: ${iscrizione.gare.nome}`
+                    });
+                }
                 throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
             }
 
             console.log('🐛 [DEBUG] ✅ Gara trovata!');
             console.log(`🆔 ID riga: ${garaTrovata.id}`);
 
-            // ✅ Estrai l'ID dal formato "SE_XXXXX"
             if (garaTrovata.id && garaTrovata.id.startsWith('SE_')) {
                 idPortale = garaTrovata.id.replace('SE_', '');
                 console.log(`🔑 ID portale estratto: ${idPortale}`);
@@ -385,37 +420,40 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             }
 
         } catch (error) {
-            // Se va in timeout, logga lo stato della tabella
             const debugInfo = await page.evaluate(() => {
                 const rows = document.querySelectorAll('#eventiDT tbody tr');
                 return Array.from(rows).map(r => r.textContent.replace(/\s+/g, ' ').trim());
             });
             console.log('⚠️ Contenuto tabella al timeout:', debugInfo);
+            
+            if (userId) {
+                await sendWebSocketMessage(userId, 'ERRORE', {
+                    message: `Gara non trovata: ${iscrizione.gare.nome}`
+                });
+            }
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
         // ============================================================
-        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI
+        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (CON RETRY)
         // ============================================================
         console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
         let navigazioneRiuscita = false;
         let tentativi = 0;
-        const maxTentativi = 3;
+        ultimoErrore = null;
 
-        while (tentativi < maxTentativi && !navigazioneRiuscita) {
+        while (tentativi < MAX_TENTATIVI && !navigazioneRiuscita) {
             tentativi++;
-            console.log(`🔄 Tentativo ${tentativi}/${maxTentativi}`);
+            console.log(`🔄 Tentativo ${tentativi}/${MAX_TENTATIVI}`);
 
             try {
-                // 1. Scroll fino alla riga
                 await page.evaluate((rowId) => {
                     const row = document.querySelector(`#${rowId}`);
                     if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }, garaTrovata.id);
                 await new Promise(resolve => setTimeout(resolve, 1500));
 
-                // 2. APRI IL MENU CON JQUERY
                 const menuAperto = await page.evaluate((rowId) => {
                     const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
                     if (!triggerEl) return false;
@@ -435,7 +473,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 if (!menuAperto) throw new Error('Impossibile aprire il menu');
                 await new Promise(resolve => setTimeout(resolve, 500));
 
-                // 3. CHIAMA IL CALLBACK CON CONTESTO JQUERY
                 const navigato = await page.evaluate((rowId) => {
                     const items = Array.from(document.querySelectorAll('.context-menu-item'));
                     const targetItem = items.find(item => 
@@ -445,28 +482,25 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                     
                     const root = $(targetItem).data('contextMenuRoot');
                     const key = $(targetItem).data('contextMenuKey');
-                    
                     const $triggerRow = $(`#${rowId}`);
                     if (!$triggerRow.length) return false;
-                    
                     if (!root || !root.callback) return false;
-                    
                     root.callback.call($triggerRow, key, root);
-                    
                     return true;
                 }, garaTrovata.id);
 
                 if (!navigato) throw new Error('Impossibile chiamare il callback');
 
-                // 4. ATTENDI LA NAVIGAZIONE
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA });
                 navigazioneRiuscita = true;
                 console.log(`✅ Navigazione riuscita al tentativo ${tentativi}`);
                 console.log(`📐 URL: ${page.url()}`);
 
             } catch (error) {
                 console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
-                if (tentativi < maxTentativi) {
+                ultimoErrore = error.message;
+                
+                if (tentativi < MAX_TENTATIVI) {
                     await new Promise(r => setTimeout(r, 1000 * tentativi));
                     await page.reload({ waitUntil: 'networkidle2' });
                 }
@@ -474,19 +508,18 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         if (!navigazioneRiuscita) {
-            const errorMsg = 'Impossibile aprire la pagina delle iscrizioni dopo 3 tentativi';
             if (userId) {
                 await sendWebSocketMessage(userId, 'ERRORE', {
-                    message: errorMsg
+                    message: `Impossibile aprire la pagina delle iscrizioni dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore || 'errore sconosciuto'}`
                 });
             }
-            throw new Error(errorMsg);
+            throw new Error(`Impossibile navigare alla pagina iscrizioni dopo ${MAX_TENTATIVI} tentativi`);
         }
 
         console.log('✅ Step 7 completato!');
 
         // ============================================================
-        // 7.5 VERIFICA PRECOMPILAZIONE (RIMOSSO LOG SPECIFICO MINERVA)
+        // 7.5 VERIFICA PRECOMPILAZIONE
         // ============================================================
         console.log('🐛 [DEBUG] Verifico se la pagina è precompilata...');
 
@@ -496,25 +529,23 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 if (!titolo) return { precompilata: false, motivo: 'Nessun header trovato' };
                 
                 const testoHeader = titolo.textContent.trim();
-                const haIdGara = /\d+\s*-\s*/.test(testoHeader);
                 const selectTurno = document.querySelector('select#turno_sel');
                 const haSelect = !!selectTurno;
                 let opzioniCount = 0;
                 if (selectTurno) opzioniCount = selectTurno.options.length;
                 const haAccordionI = !!document.querySelector('#accordion_I');
                 
-// ✅ RIMOSSO haIdGara - il select con opzioni è già la prova di precompilazione
-const precompilata = haSelect && opzioniCount > 0 && haAccordionI;
-
-return {
-    precompilata: precompilata,
-    dettagli: {
-        header: testoHeader,
-        haSelect: haSelect,
-        opzioniCount: opzioniCount,
-        haAccordionI: haAccordionI
-    }
-};
+                const precompilata = haSelect && opzioniCount > 0 && haAccordionI;
+                
+                return {
+                    precompilata: precompilata,
+                    dettagli: {
+                        header: testoHeader,
+                        haSelect: haSelect,
+                        opzioniCount: opzioniCount,
+                        haAccordionI: haAccordionI
+                    }
+                };
             });
 
             console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
@@ -522,11 +553,8 @@ return {
 
             if (!isPrecompilata.precompilata) {
                 console.warn('⚠️ Attenzione: pagina NON precompilata!');
-                console.warn('📋 Dettagli mancanti:', isPrecompilata.dettagli);
             } else {
                 console.log('✅ Pagina precompilata confermata!');
-                console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
-                console.log(`📋 Opzioni select: ${isPrecompilata.dettagli.opzioniCount}`);
             }
         } catch (error) {
             console.warn('⚠️ Errore durante verifica precompilazione:', error.message);
@@ -538,7 +566,6 @@ return {
         console.log('🐛 [DEBUG] Step 10: 🔍 Apro "Iscrizioni Gara" e leggo i turni...');
 
         try {
-            // 1. Trova e apri la sezione "Iscrizioni Gara"
             const sezioneAperta = await page.evaluate(() => {
                 const accordionI = document.querySelector('#accordion_I');
                 if (!accordionI) return false;
@@ -561,11 +588,9 @@ return {
             }
             console.log('✅ Sezione "Iscrizioni Gara" aperta!');
 
-            // 2. Attendi che il select sia visibile
             await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
             console.log('✅ Select #turno_sel visibile');
 
-            // 3. LEGGI I GIORNI DISPONIBILI
             console.log('🐛 [DEBUG] Leggo i giorni disponibili...');
             
             let giorniDisponibili = await page.evaluate(() => {
@@ -602,10 +627,6 @@ return {
                 console.log(`  - ${g.data} ${g.orario}: ${g.postiLiberi} posti liberi`);
             });
 
-            // 🔥 IMPORTANTE: INVIA SEMPRE I GIORNI ALL'APP, ANCHE SE VUOTI
-            // Questo permette all'utente di vedere il dialogo di esubero
-            
-            // Gestione esubero: se non ci sono giorni disponibili
             let isTuttiPieni = false;
             let messaggioEsubero = '';
             
@@ -614,7 +635,6 @@ return {
                 isTuttiPieni = true;
                 messaggioEsubero = 'Nessun turno disponibile per questa gara.';
             } else {
-                // Controlla se ci sono turni con posti liberi
                 const turniConPosti = giorniDisponibili.filter(g => parseInt(g.postiLiberi) > 0);
                 if (turniConPosti.length === 0) {
                     console.log('⚠️ Tutti i turni sono pieni!');
@@ -623,8 +643,6 @@ return {
                 }
             }
 
-            // ✅ Salva i giorni nel database
-            console.log('📝 Salvo i giorni disponibili nel database...');
             await supabaseAdmin
                 .from('iscrizioni_gare')
                 .update({
@@ -634,7 +652,6 @@ return {
                 .eq('id', idIscrizione);
             console.log('✅ Giorni salvati nel database');
 
-            // ✅ INVIA I GIORNI ALL'APP VIA WEBSOCKET (SEMPRE!)
             if (userId) {
                 console.log(`📤 Invio giorni via WebSocket all'utente: ${userId}`);
                 console.log(`   Giorni: ${giorniDisponibili.length}, TuttiPieni: ${isTuttiPieni}`);
@@ -649,18 +666,10 @@ return {
                     payload.messaggio = messaggioEsubero;
                 }
                 
-                const inviato = await sendWebSocketMessage(userId, 'GIORNI_DISPONIBILI', payload);
-                
-                if (!inviato) {
-                    console.warn('⚠️ ATTENZIONE: Messaggio GIORNI_DISPONIBILI NON inviato!');
-                } else {
-                    console.log('✅ Giorni inviati via WebSocket');
-                }
-            } else {
-                console.warn('⚠️ Nessun userId disponibile per inviare i giorni!');
+                await sendWebSocketMessage(userId, 'GIORNI_DISPONIBILI', payload);
+                console.log('✅ Giorni inviati via WebSocket');
             }
 
-            // ✅ SE TUTTI I TURNI SONO PIENI, ASPETTA LA SCELTA DELL'UTENTE
             if (isTuttiPieni) {
                 console.log('⏳ In attesa della scelta esubero dell\'utente (max 60 secondi)...');
                 
@@ -689,12 +698,11 @@ return {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
 
-if (!esuberoScelto) {
-    console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
-    throw new Error('Tempo scaduto per la scelta dell\'esubero');
-}
+                if (!esuberoScelto) {
+                    console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
+                    throw new Error('Tempo scaduto per la scelta dell\'esubero');
+                }
             } else {
-                // ✅ ATTENDI LA SCELTA DEL GIORNO DELL'UTENTE (solo se ci sono giorni)
                 console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
                 let giornoScelto = null;
                 const startTimeAttesa = Date.now();
@@ -721,12 +729,11 @@ if (!esuberoScelto) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
 
-if (!giornoScelto) {
-    console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
-    throw new Error('Tempo scaduto per la selezione del giorno');
-}
+                if (!giornoScelto) {
+                    console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
+                    throw new Error('Tempo scaduto per la selezione del giorno');
+                }
 
-                // 7. SELEZIONA IL GIORNO SCELTO
                 console.log(`📅 Seleziono il giorno: ${giornoScelto}`);
                 const giornoSelezionato = giorniDisponibili.find(g => 
                     g.data === giornoScelto || g.value === giornoScelto
@@ -743,7 +750,6 @@ if (!giornoScelto) {
                     }
                 }
 
-                // 8. RICERCA ATLETA
                 console.log('🔍 Ricerca atleta...');
                 try {
                     const inputAtleta = await page.waitForSelector('input.atletaIscritto', { visible: true, timeout: 5000 });
@@ -774,7 +780,6 @@ if (!giornoScelto) {
                     console.log('⚠️ Errore ricerca atleta:', e.message);
                 }
 
-                // 9. SALVATAGGIO
                 console.log('💾 Salvataggio iscrizione...');
                 try {
                     const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
@@ -790,7 +795,6 @@ if (!giornoScelto) {
                 }
             }
 
-            // 10. AGGIORNA STATO DATABASE
             console.log('📝 Aggiornamento stato iscrizione...');
             await supabaseAdmin
                 .from('iscrizioni_gare')
@@ -801,7 +805,6 @@ if (!giornoScelto) {
                 .eq('id', idIscrizione);
             console.log('✅ Stato aggiornato a "completata"');
 
-            // 11. NOTIFICA COMPLETAMENTO
             if (userId) {
                 await sendWebSocketMessage(userId, 'ISCRIZIONE_COMPLETATA', {
                     iscrizioneId: idIscrizione,
@@ -814,9 +817,6 @@ if (!giornoScelto) {
             throw error;
         }
 
-        // ============================================================
-        // FINE - RITORNO AL MAIN
-        // ============================================================
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
         console.log(`✅ [ISCRIZIONE WORKER] Completata in ${elapsed}s`);
 
@@ -825,14 +825,12 @@ if (!giornoScelto) {
     } catch (error) {
         console.error('❌ [ISCRIZIONE WORKER] Errore:', error);
 
-        // ✅ INVIA ERRORE ALL'APP PRIMA DI FALLIRE
         if (userId) {
             await sendWebSocketMessage(userId, 'ERRORE', {
                 message: 'Errore durante l\'iscrizione: ' + error.message
             });
         }
 
-        // Salvo screenshot dell'errore per debug
         try {
             const screenshotPath = `logs/error_${idIscrizione}_${Date.now()}.png`;
             await page.screenshot({ path: screenshotPath });
