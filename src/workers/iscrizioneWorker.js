@@ -218,51 +218,91 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             throw new Error(msg);
         }
 
-        // ============================================================
-        // 3. SELEZIONE DISCIPLINA "STECCA" (CON RETRY)
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 5: 🔍 Selezione disciplina STECCA con retry...');
-        let steccaRiuscita = false;
-        
-        for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+// ============================================================
+// 3. SELEZIONE DISCIPLINA "STECCA" (CON ATTESA COLORAZIONE)
+// ============================================================
+console.log('🐛 [DEBUG] Step 5: 🔍 Selezione disciplina STECCA con retry...');
+
+let steccaRiuscita = false;
+let ultimoErrore = '';
+
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    try {
+        console.log(`🔄 Tentativo STECCA ${tentativo}/${MAX_TENTATIVI}`);
+
+        // 1. Attendi che il pulsante STECCA sia presente nel DOM
+        await page.waitForFunction(() => {
+            const buttons = Array.from(document.querySelectorAll('button.dtUP_sett'));
+            return buttons.some(btn => btn.textContent?.trim() === 'STECCA');
+        }, { timeout: 10000 });
+
+        // 2. Clicca il pulsante STECCA
+        const clickEseguito = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button.dtUP_sett'));
+            const btn = buttons.find(b => b.textContent?.trim() === 'STECCA');
+            if (btn) {
+                btn.click();
+                return true;
+            }
+            return false;
+        });
+
+        if (!clickEseguito) {
+            throw new Error('Impossibile cliccare il pulsante STECCA');
+        }
+
+        // 3. ATTESA: Pulsante si COLORA (diventa attivo)
+        console.log('⏳ Attesa colorazione pulsante STECCA...');
+        await page.waitForFunction(() => {
+            const buttons = Array.from(document.querySelectorAll('button.dtUP_sett'));
+            const btn = buttons.find(b => b.textContent?.trim() === 'STECCA');
+            
+            // Verifica che il pulsante abbia una classe attiva o stile cambiato
+            return btn && (
+                btn.classList.contains('active') || 
+                btn.classList.contains('selected') || 
+                btn.classList.contains('ui-state-active') ||
+                btn.style.backgroundColor !== '' ||
+                btn.style.color !== '' ||
+                btn.getAttribute('aria-selected') === 'true'
+            );
+        }, { timeout: 5000 });
+
+        console.log('✅ STECCA COLORATO!');
+        steccaRiuscita = true;
+        console.log(`✅ STECCA selezionata e verificata al tentativo ${tentativo}`);
+        break;
+
+    } catch (error) {
+        ultimoErrore = error.message;
+        console.log(`⚠️ Tentativo STECCA ${tentativo} fallito: ${ultimoErrore}`);
+
+        if (tentativo < MAX_TENTATIVI) {
+            console.log(`⏳ Ricarico prima del tentativo ${tentativo + 1}...`);
+            await new Promise(r => setTimeout(r, 2000 * tentativo));
             try {
-                console.log(`🔄 Tentativo STECCA ${tentativo}/${MAX_TENTATIVI}`);
-                
-                const steccaClicked = await page.evaluate(() => {
-                    const buttons = document.querySelectorAll('button.dtUP_sett');
-                    for (const btn of buttons) {
-                        if (btn.textContent?.trim() === 'STECCA') {
-                            btn.click();
-                            return true;
-                        }
-                    }
-                    return false;
+                await page.reload({ waitUntil: 'networkidle2', timeout: 15000 });
+                // Riapri il gestionale sportivo
+                await page.evaluate(() => {
+                    const link = document.querySelector('a.expandfirst[href*="GS"]');
+                    if (link) link.click();
                 });
-
-                if (steccaClicked) {
-                    steccaRiuscita = true;
-                    console.log(`✅ STECCA selezionata al tentativo ${tentativo}`);
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    break;
-                }
-                throw new Error('Pulsante STECCA non trovato');
-            } catch (error) {
-                ultimoErrore = error.message;
-                console.log(`⚠️ Tentativo STECCA ${tentativo} fallito:`, error.message);
-                if (tentativo < MAX_TENTATIVI) {
-                    await new Promise(r => setTimeout(r, 2000 * tentativo));
-                    await page.reload({ waitUntil: 'networkidle2' });
-                }
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
+            } catch (reloadErr) {
+                console.log('⚠️ Warning reload:', reloadErr.message);
             }
         }
+    }
+}
 
-        if (!steccaRiuscita) {
-            const msg = `Impossibile selezionare STECCA dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
-            if (userId) {
-                await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
-            }
-            throw new Error(msg);
-        }
+if (!steccaRiuscita) {
+    const msg = `Impossibile selezionare STECCA dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+    console.log(`❌ ${msg}`);
+    if (userId) {
+        await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+    }
+    throw new Error(msg);
+}
 
         // ============================================================
         // 4. IMPOSTA FILTRI (DINAMICI)
@@ -314,22 +354,26 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }, filters);
 
         console.log(`✅ ${filtersSet.count} filtri impostati`);
-
-        await page.evaluate(() => {
-            const select = document.querySelector('select[name="eventiDT_length"]');
-            if (select) {
-                select.value = '100';
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        });
-        console.log('✅ Visualizzazione 100 elementi impostata');
-
         // ============================================================
-        // 5. ATTESA AGGIORNAMENTO LISTA GARE
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 7: ⏳ Attesa aggiornamento lista gare...');
-        await page.waitForSelector('#eventiDT tbody tr', { timeout: 15000 });
-        console.log('✅ Lista gare aggiornata!');
+// Imposta 100 elementi
+await page.evaluate(() => {
+    const select = document.querySelector('select[name="eventiDT_length"]');
+    if (select) {
+        select.value = '100';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+});
+console.log('✅ Visualizzazione 100 elementi impostata');
+
+// ============================================================
+// 5. ATTESA CARICAMENTO LISTA GARE (SPOSTATA QUI)
+// ============================================================
+console.log('🐛 [DEBUG] ⏳ Attesa caricamento lista gare...');
+await page.waitForSelector('#eventiDT tbody tr', { timeout: 15000 });
+console.log('✅ Lista gare caricata!');
+
+// Piccola pausa per stabilizzazione (opzionale)
+await new Promise(resolve => setTimeout(resolve, 1000));
 
         // ============================================================
         // 6. CERCA LA GARA NELLA LISTA (CON FALLBACK)
