@@ -11,6 +11,25 @@ dotenv.config();
 const PORTALE_URL = 'https://tesseramento.fibis.it';
 
 // ============================================================
+// FUNZIONE DI UTILITY PER INVIARE MESSAGGI WEBSOCKET
+// ============================================================
+async function sendWebSocketMessage(userId, type, payload) {
+    if (!userId) {
+        console.log('⚠️ Nessun userId per inviare messaggio WebSocket');
+        return false;
+    }
+    try {
+        const { sendToApp } = await import('../services/websocketService.js');
+        sendToApp(userId, type, payload);
+        console.log(`✅ Messaggio ${type} inviato all'utente ${userId}`);
+        return true;
+    } catch (wsError) {
+        console.log(`⚠️ Errore invio WebSocket (${type}):`, wsError.message);
+        return false;
+    }
+}
+
+// ============================================================
 // FUNZIONE PRINCIPALE
 // ============================================================
 export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null) {
@@ -26,9 +45,12 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
     // ✅ Aggiungi il debug dei log della pagina
     page.on('console', msg => console.log('🐛 [PAGE LOG]:', msg.text()));
 
+    let iscrizione = null;
+    let userId = null;
+
     try {
         // 1. Recupera i dati dell'iscrizione dal database
-        const { data: iscrizione, error: iscrizioneError } = await supabaseAdmin
+        const { data: iscrizioneData, error: iscrizioneError } = await supabaseAdmin
             .from('iscrizioni_gare')
             .select(`
                 *,
@@ -38,9 +60,12 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             .eq('id', idIscrizione)
             .single();
 
-        if (iscrizioneError || !iscrizione) {
+        if (iscrizioneError || !iscrizioneData) {
             throw new Error(`Iscrizione non trovata: ${idIscrizione}`);
         }
+        
+        iscrizione = iscrizioneData;
+        
         // ✅ AGGIUNGI: se userIdFromClient è passato, aggiorna user_id
         if (userIdFromClient && !iscrizione.user_id) {
             await supabaseAdmin
@@ -54,8 +79,12 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 .select(`*, gare (*), tesserati (*)`)
                 .eq('id', idIscrizione)
                 .single();
-            Object.assign(iscrizione, updatedIscrizione);
+            iscrizione = updatedIscrizione;
         }
+        
+        // ✅ IMPOSTA userId per i messaggi WebSocket
+        userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
+        
         console.log(`📋 Iscrizione: ${iscrizione.id}`);
         console.log(`  - Gara: ${iscrizione.gare.nome}`);
         console.log(`  - Tesserato: ${iscrizione.tesserati.nome} ${iscrizione.tesserati.cognome}`);
@@ -269,7 +298,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
 
         let idPortale = null;
-        let garaTrovata = null; // ✅ DICHIARATO QUI (fuori dal try)
+        let garaTrovata = null;
 
         try {
             // Attendi che la gara appaia nella tabella
@@ -293,7 +322,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 return null;
             }, iscrizione.gare.nome);
 
-            console.log(`✅ Gara trovata! ID riga: ${garaTrovata.id}`);
+            console.log(`✅ Gara trovata! ID riga: ${garaTrovata?.id}`);
 
             // FALLBACK: se non trovata, prova a rimuovere il filtro regione
             if (!garaTrovata) {
@@ -335,8 +364,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
                 if (garaTrovataFallback) {
                     console.log(`✅ Gara trovata (fallback)! ID riga: ${garaTrovataFallback.id}`);
-                    // Assegna alla variabile garaTrovata
-                    Object.assign(garaTrovata, garaTrovataFallback);
+                    garaTrovata = garaTrovataFallback;
                 }
             }
 
@@ -347,7 +375,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             console.log('🐛 [DEBUG] ✅ Gara trovata!');
             console.log(`🆔 ID riga: ${garaTrovata.id}`);
 
-            // ✅ Estrai l'ID dal formato "SE_XXXXX" (SENZA let, perché già dichiarato)
+            // ✅ Estrai l'ID dal formato "SE_XXXXX"
             if (garaTrovata.id && garaTrovata.id.startsWith('SE_')) {
                 idPortale = garaTrovata.id.replace('SE_', '');
                 console.log(`🔑 ID portale estratto: ${idPortale}`);
@@ -367,11 +395,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         // ============================================================
-        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (SOLUZIONE DEFINITIVA)
+        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI
         // ============================================================
         console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
-        const userId = iscrizione.user_id || iscrizione.tesserati?.user_id;
         let navigazioneRiuscita = false;
         let tentativi = 0;
         const maxTentativi = 3;
@@ -408,27 +435,22 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 if (!menuAperto) throw new Error('Impossibile aprire il menu');
                 await new Promise(resolve => setTimeout(resolve, 500));
 
-                // 3. CHIAMA IL CALLBACK CON CONTESTO JQUERY (SOLUZIONE GEMINI)
+                // 3. CHIAMA IL CALLBACK CON CONTESTO JQUERY
                 const navigato = await page.evaluate((rowId) => {
-                    // Trova "Iscrizioni" nel menu
                     const items = Array.from(document.querySelectorAll('.context-menu-item'));
                     const targetItem = items.find(item => 
                         item.textContent.trim().toLowerCase().includes('iscrizioni')
                     );
                     if (!targetItem) return false;
                     
-                    // Estrai root e key
                     const root = $(targetItem).data('contextMenuRoot');
                     const key = $(targetItem).data('contextMenuKey');
                     
-                    // Seleziona la riga con jQuery (NON DOM puro!)
                     const $triggerRow = $(`#${rowId}`);
                     if (!$triggerRow.length) return false;
                     
                     if (!root || !root.callback) return false;
                     
-                    // ✅ PASSAGGIO CORRETTO: passa l'oggetto jQuery
-                    // $(this).closest('tr').attr('id') funzionerà!
                     root.callback.call($triggerRow, key, root);
                     
                     return true;
@@ -452,23 +474,19 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         }
 
         if (!navigazioneRiuscita) {
+            const errorMsg = 'Impossibile aprire la pagina delle iscrizioni dopo 3 tentativi';
             if (userId) {
-                try {
-                    const { sendToApp } = await import('../services/websocketService.js');
-                    sendToApp(userId, 'ERRORE', {
-                        message: 'Impossibile aprire la pagina delle iscrizioni dopo 3 tentativi'
-                    });
-                } catch (wsError) {
-                    console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                }
+                await sendWebSocketMessage(userId, 'ERRORE', {
+                    message: errorMsg
+                });
             }
-            throw new Error('Impossibile navigare alla pagina iscrizioni dopo 3 tentativi');
+            throw new Error(errorMsg);
         }
 
         console.log('✅ Step 7 completato!');
 
         // ============================================================
-        // 7.5 VERIFICA PRECOMPILAZIONE (SOLO LOG)
+        // 7.5 VERIFICA PRECOMPILAZIONE (RIMOSSO LOG SPECIFICO MINERVA)
         // ============================================================
         console.log('🐛 [DEBUG] Verifico se la pagina è precompilata...');
 
@@ -484,9 +502,9 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 let opzioniCount = 0;
                 if (selectTurno) opzioniCount = selectTurno.options.length;
                 const haAccordionI = !!document.querySelector('#accordion_I');
-                const contieneMinerva = testoHeader.includes('MINERVA') || testoHeader.includes('TROFEO');
                 
-                const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI && contieneMinerva;
+                // ✅ RIMOSSO CONTROLLO SPECIFICO "MINERVA"
+                const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI;
                 
                 return {
                     precompilata: precompilata,
@@ -495,8 +513,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                         haIdGara: haIdGara,
                         haSelect: haSelect,
                         opzioniCount: opzioniCount,
-                        haAccordionI: haAccordionI,
-                        contieneMinerva: contieneMinerva
+                        haAccordionI: haAccordionI
                     }
                 };
             });
@@ -507,7 +524,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             if (!isPrecompilata.precompilata) {
                 console.warn('⚠️ Attenzione: pagina NON precompilata!');
                 console.warn('📋 Dettagli mancanti:', isPrecompilata.dettagli);
-                // NON blocchiamo il flusso, solo log
             } else {
                 console.log('✅ Pagina precompilata confermata!');
                 console.log(`📋 Header: "${isPrecompilata.dettagli.header}"`);
@@ -515,7 +531,6 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
             }
         } catch (error) {
             console.warn('⚠️ Errore durante verifica precompilazione:', error.message);
-            // NON blocchiamo il flusso
         }
 
         // ============================================================
@@ -588,183 +603,202 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 console.log(`  - ${g.data} ${g.orario}: ${g.postiLiberi} posti liberi`);
             });
 
+            // 🔥 IMPORTANTE: INVIA SEMPRE I GIORNI ALL'APP, ANCHE SE VUOTI
+            // Questo permette all'utente di vedere il dialogo di esubero
+            
             // Gestione esubero: se non ci sono giorni disponibili
+            let isTuttiPieni = false;
+            let messaggioEsubero = '';
+            
             if (giorniDisponibili.length === 0) {
                 console.log('⚠️ Nessun giorno disponibile per questa gara');
-                if (userId) {
-                    try {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
-                            message: 'Nessun giorno disponibile per questa gara'
-                        });
-                    } catch (wsError) {
-                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
-                    }
-                }
-                throw new Error('Nessun giorno disponibile');
-            }
-
-            // Gestione esubero: controlla se ci sono turni con posti liberi
-            const turniConPosti = giorniDisponibili.filter(g => parseInt(g.postiLiberi) > 0);
-
-            if (turniConPosti.length === 0) {
-                console.log('⚠️ Tutti i turni sono pieni!');
-                giorniDisponibili.push({
-                    value: '',
-                    testo: 'Esubero senza preferenza (tutti i turni sono pieni)',
-                    data: 'Esubero',
-                    orario: '',
-                    postiLiberi: '0',
-                    isEsubero: true
-                });
-                if (userId) {
-                    try {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'GIORNI_DISPONIBILI', {
-                            iscrizioneId: idIscrizione,
-                            giorni: giorniDisponibili,
-                            tuttiPieni: true,
-                            messaggio: 'Tutti i turni sono pieni. Puoi iscriverti in esubero.'
-                        });
-                        console.log('✅ Messaggio esubero inviato via WebSocket');
-                    } catch (wsError) {
-                        console.log('⚠️ Errore invio messaggio esubero via WebSocket:', wsError.message);
-                    }
+                isTuttiPieni = true;
+                messaggioEsubero = 'Nessun turno disponibile per questa gara.';
+            } else {
+                // Controlla se ci sono turni con posti liberi
+                const turniConPosti = giorniDisponibili.filter(g => parseInt(g.postiLiberi) > 0);
+                if (turniConPosti.length === 0) {
+                    console.log('⚠️ Tutti i turni sono pieni!');
+                    isTuttiPieni = true;
+                    messaggioEsubero = 'Tutti i turni sono pieni. Puoi iscriverti in esubero.';
                 }
             }
 
-            // 4. SALVA I GIORNI NEL DATABASE
+            // ✅ Salva i giorni nel database
             console.log('📝 Salvo i giorni disponibili nel database...');
             await supabaseAdmin
                 .from('iscrizioni_gare')
                 .update({
                     giorni_disponibili: JSON.stringify(giorniDisponibili),
-                    stato: 'in_attesa_giorni'
+                    stato: isTuttiPieni ? 'in_attesa_esubero' : 'in_attesa_giorni'
                 })
                 .eq('id', idIscrizione);
             console.log('✅ Giorni salvati nel database');
 
-            // 5. INVIA I GIORNI ALL'APP VIA WEBSOCKET
-            if (userId && turniConPosti.length > 0) {
+            // ✅ INVIA I GIORNI ALL'APP VIA WEBSOCKET (SEMPRE!)
+            if (userId) {
                 console.log(`📤 Invio giorni via WebSocket all'utente: ${userId}`);
-                try {
-                    const { sendToApp } = await import('../services/websocketService.js');
-                    sendToApp(userId, 'GIORNI_DISPONIBILI', {
-                        iscrizioneId: idIscrizione,
-                        giorni: giorniDisponibili
-                    });
+                console.log(`   Giorni: ${giorniDisponibili.length}, TuttiPieni: ${isTuttiPieni}`);
+                
+                const payload = {
+                    iscrizioneId: idIscrizione,
+                    giorni: giorniDisponibili,
+                    tuttiPieni: isTuttiPieni
+                };
+                
+                if (isTuttiPieni) {
+                    payload.messaggio = messaggioEsubero;
+                }
+                
+                const inviato = await sendWebSocketMessage(userId, 'GIORNI_DISPONIBILI', payload);
+                
+                if (!inviato) {
+                    console.warn('⚠️ ATTENZIONE: Messaggio GIORNI_DISPONIBILI NON inviato!');
+                } else {
                     console.log('✅ Giorni inviati via WebSocket');
-                } catch (wsError) {
-                    console.log('⚠️ Errore invio WebSocket:', wsError.message);
                 }
+            } else {
+                console.warn('⚠️ Nessun userId disponibile per inviare i giorni!');
             }
 
-            // 6. ATTENDI LA SCELTA DELL'UTENTE
-            console.log('⏳ In attesa della scelta dell\'utente (max 60 secondi)...');
-            let giornoScelto = null;
-            const startTimeAttesa = Date.now();
-            const maxWaitTime = 60000;
+            // ✅ SE TUTTI I TURNI SONO PIENI, ASPETTA LA SCELTA DELL'UTENTE
+            if (isTuttiPieni) {
+                console.log('⏳ In attesa della scelta esubero dell\'utente (max 60 secondi)...');
+                
+                let esuberoScelto = null;
+                const startTimeAttesaEsubero = Date.now();
+                const maxWaitTimeEsubero = 60000;
 
-            while (Date.now() - startTimeAttesa < maxWaitTime) {
-                const { data: checkData, error: checkError } = await supabaseAdmin
-                    .from('iscrizioni_gare')
-                    .select('giorno_iscrizione, stato')
-                    .eq('id', idIscrizione)
-                    .single();
+                while (Date.now() - startTimeAttesaEsubero < maxWaitTimeEsubero) {
+                    const { data: checkData, error: checkError } = await supabaseAdmin
+                        .from('iscrizioni_gare')
+                        .select('giorno_iscrizione, stato')
+                        .eq('id', idIscrizione)
+                        .single();
 
-                if (checkError) {
-                    console.log('⚠️ Errore controllo DB:', checkError.message);
-                } else if (checkData.giorno_iscrizione) {
-                    giornoScelto = checkData.giorno_iscrizione;
-                    console.log(`✅ Giorno scelto dall'utente: ${giornoScelto}`);
-                    break;
+                    if (checkError) {
+                        console.log('⚠️ Errore controllo DB:', checkError.message);
+                    } else if (checkData.giorno_iscrizione === 'Esubero') {
+                        esuberoScelto = checkData.giorno_iscrizione;
+                        console.log(`✅ Esubero scelto dall'utente!`);
+                        break;
+                    } else if (checkData.stato === 'annullata') {
+                        console.log('❌ Iscrizione annullata dall\'utente');
+                        throw new Error('Iscrizione annullata dall\'utente');
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
 
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+                if (!esuberoScelto) {
+                    console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
+                    if (userId) {
+                        await sendWebSocketMessage(userId, 'ERRORE', {
+                            message: 'Tempo scaduto per la scelta dell\'esubero'
+                        });
+                    }
+                    throw new Error('Timeout attesa scelta esubero utente');
+                }
+            } else {
+                // ✅ ATTENDI LA SCELTA DEL GIORNO DELL'UTENTE (solo se ci sono giorni)
+                console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
+                let giornoScelto = null;
+                const startTimeAttesa = Date.now();
+                const maxWaitTime = 60000;
 
-            if (!giornoScelto) {
-                console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
-                if (userId) {
-                    try {
-                        const { sendToApp } = await import('../services/websocketService.js');
-                        sendToApp(userId, 'ERRORE', {
+                while (Date.now() - startTimeAttesa < maxWaitTime) {
+                    const { data: checkData, error: checkError } = await supabaseAdmin
+                        .from('iscrizioni_gare')
+                        .select('giorno_iscrizione, stato')
+                        .eq('id', idIscrizione)
+                        .single();
+
+                    if (checkError) {
+                        console.log('⚠️ Errore controllo DB:', checkError.message);
+                    } else if (checkData.giorno_iscrizione) {
+                        giornoScelto = checkData.giorno_iscrizione;
+                        console.log(`✅ Giorno scelto dall'utente: ${giornoScelto}`);
+                        break;
+                    } else if (checkData.stato === 'annullata') {
+                        console.log('❌ Iscrizione annullata dall\'utente');
+                        throw new Error('Iscrizione annullata dall\'utente');
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                if (!giornoScelto) {
+                    console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
+                    if (userId) {
+                        await sendWebSocketMessage(userId, 'ERRORE', {
                             message: 'Tempo scaduto per la selezione del giorno'
                         });
-                    } catch (wsError) {
-                        console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
                     }
+                    throw new Error('Timeout attesa scelta utente');
                 }
-                throw new Error('Timeout attesa scelta utente');
-            }
 
-            // 7. SELEZIONA IL GIORNO SCELTO
-            console.log(`📅 Seleziono il giorno: ${giornoScelto}`);
-            const giornoSelezionato = giorniDisponibili.find(g => 
-                g.data === giornoScelto || g.value === giornoScelto
-            );
+                // 7. SELEZIONA IL GIORNO SCELTO
+                console.log(`📅 Seleziono il giorno: ${giornoScelto}`);
+                const giornoSelezionato = giorniDisponibili.find(g => 
+                    g.data === giornoScelto || g.value === giornoScelto
+                );
 
-            if (giornoSelezionato) {
-                console.log(`✅ Giorno trovato: ${giornoSelezionato.data} (value: ${giornoSelezionato.value})`);
-                await page.select('select#turno_sel', giornoSelezionato.value);
-                console.log('✅ Giorno selezionato!');
-            } else {
-                if (giornoScelto === 'Esubero' || giornoScelto === '') {
-                    console.log('✅ Opzione esubero selezionata');
-                    await page.select('select#turno_sel', '');
-                    console.log('✅ Esubero selezionato!');
+                if (giornoSelezionato) {
+                    console.log(`✅ Giorno trovato: ${giornoSelezionato.data} (value: ${giornoSelezionato.value})`);
+                    await page.select('select#turno_sel', giornoSelezionato.value);
+                    console.log('✅ Giorno selezionato!');
                 } else {
                     console.log(`⚠️ Giorno ${giornoScelto} non trovato. Uso il primo.`);
                     if (giorniDisponibili.length > 0) {
                         await page.select('select#turno_sel', giorniDisponibili[0].value);
                     }
                 }
-            }
 
-            // 8. RICERCA ATLETA
-            console.log('🔍 Ricerca atleta...');
-            try {
-                const inputAtleta = await page.waitForSelector('input.atletaIscritto', { visible: true, timeout: 5000 });
-                if (inputAtleta) {
-                    await inputAtleta.type(iscrizione.tesserati.cognome, { delay: 100 });
-                    console.log(`✅ Cognome digitato: ${iscrizione.tesserati.cognome}`);
-                    
-                    const lente = await page.waitForSelector('img.elencoIscritti', { visible: true, timeout: 5000 });
-                    if (lente) {
-                        await lente.click();
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                    
-                    try {
-                        const atletaTrovato = await page.waitForSelector(
-                            'table tbody tr:first-child, .ui-menu-item, .autocomplete-item',
-                            { visible: true, timeout: 3000 }
-                        );
-                        if (atletaTrovato) {
-                            await atletaTrovato.click();
-                            console.log('✅ Atleta selezionato!');
+                // 8. RICERCA ATLETA
+                console.log('🔍 Ricerca atleta...');
+                try {
+                    const inputAtleta = await page.waitForSelector('input.atletaIscritto', { visible: true, timeout: 5000 });
+                    if (inputAtleta) {
+                        await inputAtleta.type(iscrizione.tesserati.cognome, { delay: 100 });
+                        console.log(`✅ Cognome digitato: ${iscrizione.tesserati.cognome}`);
+                        
+                        const lente = await page.waitForSelector('img.elencoIscritti', { visible: true, timeout: 5000 });
+                        if (lente) {
+                            await lente.click();
+                            await new Promise(resolve => setTimeout(resolve, 1000));
                         }
-                    } catch (e) {
-                        console.log('⚠️ Nessun atleta trovato');
+                        
+                        try {
+                            const atletaTrovato = await page.waitForSelector(
+                                'table tbody tr:first-child, .ui-menu-item, .autocomplete-item',
+                                { visible: true, timeout: 3000 }
+                            );
+                            if (atletaTrovato) {
+                                await atletaTrovato.click();
+                                console.log('✅ Atleta selezionato!');
+                            }
+                        } catch (e) {
+                            console.log('⚠️ Nessun atleta trovato');
+                        }
                     }
+                } catch (e) {
+                    console.log('⚠️ Errore ricerca atleta:', e.message);
                 }
-            } catch (e) {
-                console.log('⚠️ Errore ricerca atleta:', e.message);
-            }
 
-            // 9. SALVATAGGIO
-            console.log('💾 Salvataggio iscrizione...');
-            try {
-                const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
-                if (btnSalva) {
-                    await Promise.all([
-                        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
-                        btnSalva.click()
-                    ]);
-                    console.log('✅ Iscrizione salvata!');
+                // 9. SALVATAGGIO
+                console.log('💾 Salvataggio iscrizione...');
+                try {
+                    const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
+                    if (btnSalva) {
+                        await Promise.all([
+                            page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
+                            btnSalva.click()
+                        ]);
+                        console.log('✅ Iscrizione salvata!');
+                    }
+                } catch (e) {
+                    console.log('⚠️ Errore salvataggio:', e.message);
                 }
-            } catch (e) {
-                console.log('⚠️ Errore salvataggio:', e.message);
             }
 
             // 10. AGGIORNA STATO DATABASE
@@ -780,16 +814,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 
             // 11. NOTIFICA COMPLETAMENTO
             if (userId) {
-                try {
-                    const { sendToApp } = await import('../services/websocketService.js');
-                    sendToApp(userId, 'ISCRIZIONE_COMPLETATA', {
-                        iscrizioneId: idIscrizione,
-                        message: 'Iscrizione completata con successo!'
-                    });
-                    console.log('📤 Notifica completamento inviata');
-                } catch (wsError) {
-                    console.log('⚠️ Errore invio notifica:', wsError.message);
-                }
+                await sendWebSocketMessage(userId, 'ISCRIZIONE_COMPLETATA', {
+                    iscrizioneId: idIscrizione,
+                    message: 'Iscrizione completata con successo!'
+                });
             }
 
         } catch (error) {
@@ -809,17 +837,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         console.error('❌ [ISCRIZIONE WORKER] Errore:', error);
 
         // ✅ INVIA ERRORE ALL'APP PRIMA DI FALLIRE
-        try {
-            const userId = iscrizione?.user_id || iscrizione?.tesserati?.user_id;
-            if (userId) {
-                const { sendToApp } = await import('../services/websocketService.js');
-                sendToApp(userId, 'ERRORE', {
-                    message: 'Errore durante l\'iscrizione: ' + error.message
-                });
-                console.log('📤 Messaggio errore generico inviato all\'app');
-            }
-        } catch (wsError) {
-            console.log('⚠️ Errore invio errore via WebSocket:', wsError.message);
+        if (userId) {
+            await sendWebSocketMessage(userId, 'ERRORE', {
+                message: 'Errore durante l\'iscrizione: ' + error.message
+            });
         }
 
         // Salvo screenshot dell'errore per debug
@@ -844,6 +865,3 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         await browser.close();
     }
 }
-
-
-

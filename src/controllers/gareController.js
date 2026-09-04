@@ -136,10 +136,6 @@ export const createGara = async (req, res) => {
 // POST /api/gare/:id/iscriviti
 // Iscrizione automatica di un tesserato a una gara
 // ============================================================
-// ============================================================
-// POST /api/gare/:id/iscriviti
-// Iscrizione automatica di un tesserato a una gara
-// ============================================================
 export const iscrivitiGara = async (req, res) => {
     try {
         const { id } = req.params;
@@ -237,12 +233,14 @@ export const iscrivitiGara = async (req, res) => {
                     throw updateError;
                 }
                 
-                // Avvia il worker per l'iscrizione riavviata
-                import('../workers/iscrizioneWorker.js').then(({ eseguiIscrizioneGara }) => {
-                    eseguiIscrizioneGara(existing.id);
-                }).catch(err => {
-                    console.error('❌ Errore caricamento worker:', err);
-                });
+                // ✅ AVVIA IL WORKER PER L'ISCRIZIONE RIAVVIATA (PASSANDO userId)
+                try {
+                    const { eseguiIscrizioneGara } = await import('../workers/iscrizioneWorker.js');
+                    eseguiIscrizioneGara(existing.id, userId); // ✅ PASSA userId!
+                    console.log(`✅ Worker avviato per iscrizione ${existing.id} (riavvio) con userId ${userId}`);
+                } catch (workerError) {
+                    console.error('❌ Errore caricamento worker (riavvio):', workerError);
+                }
                 
                 return res.status(200).json({
                     success: true,
@@ -278,7 +276,15 @@ export const iscrivitiGara = async (req, res) => {
 
         console.log(`✅ Iscrizione creata: ${iscrizione.id}`);
 
-
+        // ✅ 🔥 AVVIA IL WORKER CON userId (MODIFICA PRINCIPALE!)
+        try {
+            const { eseguiIscrizioneGara } = await import('../workers/iscrizioneWorker.js');
+            eseguiIscrizioneGara(iscrizione.id, userId); // ✅ PASSA userId!
+            console.log(`✅ Worker avviato per iscrizione ${iscrizione.id} con userId ${userId}`);
+        } catch (workerError) {
+            console.error('❌ Errore caricamento worker:', workerError);
+            // Non bloccare la risposta se il worker non parte
+        }
 
         // 7. Restituisci risposta immediata
         res.status(201).json({
@@ -292,6 +298,7 @@ export const iscrivitiGara = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
 // ============================================================
 // PUT /api/gare/:id
 // Aggiorna una gara esistente (solo admin)
