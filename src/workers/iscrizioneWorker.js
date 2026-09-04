@@ -221,82 +221,79 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 // ============================================================
 // 3. SELEZIONE DISCIPLINA "STECCA" (CON ATTESA COLORAZIONE)
 // ============================================================
-console.log('🐛 [DEBUG] Step 5: 🔍 Selezione disciplina STECCA con retry...');
+// ============================================================
+// 3. SELEZIONE STECCA (VELOCE E SICURO) - VERSIONE RAZZO 🚀
+// ============================================================
+console.log('🐛 [DEBUG] Step 5: 🔍 Selezione STECCA...');
 
 let steccaRiuscita = false;
-let ultimoErrore = '';
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     try {
-        console.log(`🔄 Tentativo STECCA ${tentativo}/${MAX_TENTATIVI}`);
+        console.log(`🔄 Tentativo ${tentativo}/${MAX_TENTATIVI}`);
 
-        // 1. Attendi che il pulsante STECCA sia presente nel DOM
-        await page.waitForFunction(() => {
-            const buttons = Array.from(document.querySelectorAll('button.dtUP_sett'));
-            return buttons.some(btn => btn.textContent?.trim() === 'STECCA');
-        }, { timeout: 10000 });
-
-        // 2. Clicca il pulsante STECCA
-        const clickEseguito = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button.dtUP_sett'));
-            const btn = buttons.find(b => b.textContent?.trim() === 'STECCA');
-            if (btn) {
-                btn.click();
-                return true;
-            }
-            return false;
+        // 1. Trova STECCA (con fallback multipli - 2 secondi max)
+        const btn = await page.evaluate(() => {
+            // Prova 1: Data attribute
+            let b = document.querySelector('button[data-disciplina="STECCA"]');
+            if (b) return b;
+            
+            // Prova 2: Classe + testo
+            const buttons = document.querySelectorAll('button.dtUP_sett');
+            b = Array.from(buttons).find(btn => 
+                btn.textContent?.trim().toUpperCase() === 'STECCA'
+            );
+            if (b) return b;
+            
+            // Prova 3: Qualsiasi button
+            const allBtns = document.querySelectorAll('button');
+            b = Array.from(allBtns).find(btn => 
+                btn.textContent?.trim().toUpperCase() === 'STECCA'
+            );
+            return b || null;
         });
 
-        if (!clickEseguito) {
-            throw new Error('Impossibile cliccare il pulsante STECCA');
+        if (!btn) {
+            throw new Error('STECCA non trovato');
         }
 
-        // 3. ATTESA: Pulsante si COLORA (diventa attivo)
-        console.log('⏳ Attesa colorazione pulsante STECCA...');
-        await page.waitForFunction(() => {
-            const buttons = Array.from(document.querySelectorAll('button.dtUP_sett'));
-            const btn = buttons.find(b => b.textContent?.trim() === 'STECCA');
-            
-            // Verifica che il pulsante abbia una classe attiva o stile cambiato
-            return btn && (
-                btn.classList.contains('active') || 
-                btn.classList.contains('selected') || 
-                btn.classList.contains('ui-state-active') ||
-                btn.style.backgroundColor !== '' ||
-                btn.style.color !== '' ||
-                btn.getAttribute('aria-selected') === 'true'
-            );
-        }, { timeout: 5000 });
+        // 2. Click (veloce, senza attese)
+        await page.evaluate((el) => el.click(), btn);
+        console.log('✅ Click STECCA eseguito');
 
-        console.log('✅ STECCA COLORATO!');
+        // 3. Verifica attivazione (max 3 secondi)
+        const attivo = await page.waitForFunction(() => {
+            const b = document.querySelector('button.dtUP_sett');
+            if (!b) return false;
+            
+            // Controlli rapidi
+            return b.classList.contains('active') || 
+                   b.classList.contains('selected') ||
+                   b.getAttribute('aria-selected') === 'true' ||
+                   document.querySelector('select[name="stagione_f"]') !== null;
+        }, { timeout: 3000 });
+
+        if (!attivo) {
+            throw new Error('STECCA non si è attivato');
+        }
+
+        console.log('✅ STECCA attivo!');
         steccaRiuscita = true;
-        console.log(`✅ STECCA selezionata e verificata al tentativo ${tentativo}`);
         break;
 
     } catch (error) {
-        ultimoErrore = error.message;
-        console.log(`⚠️ Tentativo STECCA ${tentativo} fallito: ${ultimoErrore}`);
-
+        ultimoErrore = error.message;  // ← USA quella già dichiarata
+        console.log(`⚠️ Tentativo ${tentativo} fallito: ${ultimoErrore}`);
+        
         if (tentativo < MAX_TENTATIVI) {
-            console.log(`⏳ Ricarico prima del tentativo ${tentativo + 1}...`);
-            await new Promise(r => setTimeout(r, 2000 * tentativo));
-            try {
-                await page.reload({ waitUntil: 'networkidle2', timeout: 15000 });
-                // Riapri il gestionale sportivo
-                await page.evaluate(() => {
-                    const link = document.querySelector('a.expandfirst[href*="GS"]');
-                    if (link) link.click();
-                });
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
-            } catch (reloadErr) {
-                console.log('⚠️ Warning reload:', reloadErr.message);
-            }
+            await page.reload({ waitUntil: 'networkidle2', timeout: 10000 });
+            await new Promise(r => setTimeout(r, 500));
         }
     }
 }
 
 if (!steccaRiuscita) {
-    const msg = `Impossibile selezionare STECCA dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+    const msg = `STECCA fallito dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
     console.log(`❌ ${msg}`);
     if (userId) {
         await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
