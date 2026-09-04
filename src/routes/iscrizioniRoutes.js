@@ -17,9 +17,9 @@ router.get('/tesserato/:idTesserato', authenticate, async (req, res) => {
 
         const { data, error } = await supabaseAdmin
             .from('iscrizioni_gare')
-            .select('id_gara, stato, giorno_iscrizione, id_tesserato, created_at')
+            .select('id_gara, stato, giorno_iscrizione, id_tesserato')
             .eq('id_tesserato', idTesserato)
-            .order('created_at', { ascending: false });
+            .order('data_iscrizione', { ascending: false });  // ✅ MODIFICA QUI
 
         if (error) {
             console.error('❌ Errore getIscrizioniByTesserato:', error);
