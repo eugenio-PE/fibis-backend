@@ -503,19 +503,18 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                 if (selectTurno) opzioniCount = selectTurno.options.length;
                 const haAccordionI = !!document.querySelector('#accordion_I');
                 
-                // ✅ RIMOSSO CONTROLLO SPECIFICO "MINERVA"
-                const precompilata = haIdGara && haSelect && opzioniCount > 0 && haAccordionI;
-                
-                return {
-                    precompilata: precompilata,
-                    dettagli: {
-                        header: testoHeader,
-                        haIdGara: haIdGara,
-                        haSelect: haSelect,
-                        opzioniCount: opzioniCount,
-                        haAccordionI: haAccordionI
-                    }
-                };
+// ✅ RIMOSSO haIdGara - il select con opzioni è già la prova di precompilazione
+const precompilata = haSelect && opzioniCount > 0 && haAccordionI;
+
+return {
+    precompilata: precompilata,
+    dettagli: {
+        header: testoHeader,
+        haSelect: haSelect,
+        opzioniCount: opzioniCount,
+        haAccordionI: haAccordionI
+    }
+};
             });
 
             console.log(`📐 Pagina precompilata? ${isPrecompilata.precompilata}`);
@@ -690,15 +689,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
 
-                if (!esuberoScelto) {
-                    console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
-                    if (userId) {
-                        await sendWebSocketMessage(userId, 'ERRORE', {
-                            message: 'Tempo scaduto per la scelta dell\'esubero'
-                        });
-                    }
-                    throw new Error('Timeout attesa scelta esubero utente');
-                }
+if (!esuberoScelto) {
+    console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
+    throw new Error('Tempo scaduto per la scelta dell\'esubero');
+}
             } else {
                 // ✅ ATTENDI LA SCELTA DEL GIORNO DELL'UTENTE (solo se ci sono giorni)
                 console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
@@ -727,15 +721,10 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
 
-                if (!giornoScelto) {
-                    console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
-                    if (userId) {
-                        await sendWebSocketMessage(userId, 'ERRORE', {
-                            message: 'Tempo scaduto per la selezione del giorno'
-                        });
-                    }
-                    throw new Error('Timeout attesa scelta utente');
-                }
+if (!giornoScelto) {
+    console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
+    throw new Error('Tempo scaduto per la selezione del giorno');
+}
 
                 // 7. SELEZIONA IL GIORNO SCELTO
                 console.log(`📅 Seleziono il giorno: ${giornoScelto}`);
