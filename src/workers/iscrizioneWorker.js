@@ -122,102 +122,199 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         await page.setViewport({ width: 1920, height: 1080 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-        // ============================================================
-        // 1. LOGIN (CON RETRY)
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 1-3: 🔐 Login con retry...');
-        let loginRiuscito = false;
+       // ============================================================
+// 1. LOGIN (VELOCE)
+// ============================================================
+console.log('🐛 [DEBUG] Step 1-3: 🔐 Login...');
+
+let loginRiuscito = false;
+
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    try {
+        console.log(`🔄 Tentativo login ${tentativo}/${MAX_TENTATIVI}`);
         
-        for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
-            try {
-                console.log(`🔄 Tentativo login ${tentativo}/${MAX_TENTATIVI}`);
-                
-                await page.goto(PORTALE_URL, {
-                    waitUntil: 'networkidle2',
-                    timeout: TIMEOUT_ATTESA
-                });
-                console.log(`🐛 [DEBUG] ✅ URL caricato: ${page.url()}`);
+        // Vai alla pagina di login
+        await page.goto(PORTALE_URL, {
+            waitUntil: 'domcontentloaded', // ← più veloce di networkidle2
+            timeout: 10000
+        });
+        console.log(`🐛 [DEBUG] ✅ URL caricato: ${page.url()}`);
 
-                await page.type('#edit-name', credenziali.username);
-                await page.type('#edit-pass', credenziali.password);
-                await page.click('#edit-submit-1');
-
-                await page.waitForNavigation({
-                    waitUntil: 'networkidle2',
-                    timeout: TIMEOUT_ATTESA
-                });
-                
-                const urlCorrente = page.url();
-                if (urlCorrente.includes('bacheca') || urlCorrente.includes('GS')) {
-                    loginRiuscito = true;
-                    console.log(`✅ Login riuscito al tentativo ${tentativo}`);
-                    break;
-                }
-            } catch (error) {
-                ultimoErrore = error.message;
-                console.log(`⚠️ Tentativo login ${tentativo} fallito:`, error.message);
-                if (tentativo < MAX_TENTATIVI) {
-                    await new Promise(r => setTimeout(r, 2000 * tentativo));
-                }
-            }
-        }
-
-        if (!loginRiuscito) {
-            const msg = `Login fallito dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
-            if (userId) {
-                await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
-            }
-            throw new Error(msg);
-        }
-
-        // ============================================================
-        // 2. GESTIONALE SPORTIVO (CON RETRY)
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo con retry...');
-        let gestionaleRiuscito = false;
+        // Aspetta che il form sia pronto (max 3 secondi)
+        await page.waitForSelector('#edit-name', { timeout: 3000, visible: true });
         
-        for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+        // Inserisci credenziali
+        await page.type('#edit-name', credenziali.username, { delay: 50 });
+        await page.type('#edit-pass', credenziali.password, { delay: 50 });
+        
+        // Click login e attendi navigazione
+        await Promise.all([
+            page.waitForNavigation({ 
+                waitUntil: 'domcontentloaded', // ← più veloce
+                timeout: 15000 
+            }),
+            page.click('#edit-submit-1')
+        ]);
+        
+        const urlCorrente = page.url();
+        if (urlCorrente.includes('bacheca') || urlCorrente.includes('GS')) {
+            loginRiuscito = true;
+            console.log(`✅ Login riuscito al tentativo ${tentativo}`);
+            
+            // Aspetta che la bacheca sia realmente pronta (elementi chiave)
             try {
-                console.log(`🔄 Tentativo gestionale ${tentativo}/${MAX_TENTATIVI}`);
-                
-                const gestionaleClicked = await page.evaluate(() => {
-                    const link = document.querySelector('a.expandfirst[href*="GS"]');
-                    if (link) {
-                        link.click();
-                        return true;
+                await page.waitForSelector('a.expandfirst, .menu, #menu', { 
+                    timeout: 5000,
+                    visible: true 
+                });
+                console.log('✅ Bacheca caricata e pronta');
+            } catch (e) {
+                console.log('⚠️ Bacheca caricata ma alcuni elementi non trovati, continuo...');
+            }
+            break;
+        }
+    } catch (error) {
+        ultimoErrore = error.message;
+        console.log(`⚠️ Tentativo login ${tentativo} fallito:`, error.message);
+        if (tentativo < MAX_TENTATIVI) {
+            await new Promise(r => setTimeout(r, 1500 * tentativo));
+        }
+    }
+}
+
+if (!loginRiuscito) {
+    const msg = `Login fallito dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+    console.log(`❌ ${msg}`);
+    if (userId) {
+        await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+    }
+    throw new Error(msg);
+}
+
+// ============================================================
+// 2. GESTIONALE SPORTIVO (INFIALLIBILE) 
+// ============================================================
+console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo...');
+
+let gestionaleRiuscito = false;
+
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    try {
+        console.log(`🔄 Tentativo GS ${tentativo}/${MAX_TENTATIVI}`);
+
+        // 1. Prima di tutto, aspetta che la bacheca sia completamente carica
+        await page.waitForFunction(() => {
+            return document.readyState === 'complete';
+        }, { timeout: 5000 });
+
+        // 2. Prova a trovare il link GS con MULTIPLI selettori
+        const linkTrovato = await page.evaluate(() => {
+            // Prova 1: Selettore originale
+            let link = document.querySelector('a.expandfirst[href*="GS"]');
+            
+            // Prova 2: Cerca per href che contiene GS
+            if (!link) {
+                link = document.querySelector('a[href*="/GS"]');
+            }
+            
+            // Prova 3: Cerca per testo
+            if (!link) {
+                const links = document.querySelectorAll('a');
+                for (const a of links) {
+                    if (a.textContent?.trim().toLowerCase().includes('gestionale sportivo')) {
+                        link = a;
+                        break;
                     }
-                    return false;
+                }
+            }
+            
+            // Prova 4: Cerca per classe (se il portale usa classi diverse)
+            if (!link) {
+                link = document.querySelector('a.menu-gs, a.gs-link, a[data-gs="true"]');
+            }
+            
+            if (link) {
+                link.click();
+                return true;
+            }
+            return false;
+        });
+
+        if (!linkTrovato) {
+            // Log dello stato della pagina per debug
+            const stato = await page.evaluate(() => {
+                const links = Array.from(document.querySelectorAll('a')).slice(0, 10);
+                return {
+                    totalLinks: document.querySelectorAll('a').length,
+                    sampleLinks: links.map(a => ({
+                        text: a.textContent?.trim().slice(0, 30),
+                        href: a.href?.slice(0, 50),
+                        class: a.className
+                    }))
+                };
+            });
+            console.log('📊 Stato pagina:', JSON.stringify(stato, null, 2));
+            throw new Error('Link GS non trovato con nessun selettore');
+        }
+
+        console.log('✅ Click GS eseguito');
+
+        // 3. Attendi la navigazione (con fallback)
+        const navigato = await Promise.race([
+            page.waitForNavigation({ 
+                waitUntil: 'domcontentloaded', 
+                timeout: 15000 
+            }),
+            page.waitForSelector('button.dtUP_sett, select[name="stagione_f"]', { 
+                timeout: 15000,
+                visible: true 
+            }).then(() => true)
+        ]);
+
+        if (!navigato) {
+            throw new Error('Navigazione GS non completata');
+        }
+
+        const urlCorrente = page.url();
+        if (urlCorrente.includes('/GS') || urlCorrente.includes('GS')) {
+            gestionaleRiuscito = true;
+            console.log(`✅ Gestionale sportivo riuscito al tentativo ${tentativo}`);
+            console.log(`📐 URL GS: ${urlCorrente}`);
+            
+            // Piccola pausa per stabilizzazione (opzionale)
+            await new Promise(resolve => setTimeout(resolve, 500));
+            break;
+        }
+
+    } catch (error) {
+        ultimoErrore = error.message;
+        console.log(`⚠️ Tentativo GS ${tentativo} fallito: ${ultimoErrore}`);
+        
+        if (tentativo < MAX_TENTATIVI) {
+            console.log(`⏳ Riprovo tra ${tentativo * 2} secondi...`);
+            await new Promise(r => setTimeout(r, 2000 * tentativo));
+            // Torna alla bacheca e ricarica
+            try {
+                await page.goto(PORTALE_URL + '/bacheca', { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 10000 
                 });
-
-                if (!gestionaleClicked) {
-                    throw new Error('Link "Gestionale sportivo" non trovato');
-                }
-
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA });
-                const urlCorrente = page.url();
-                if (urlCorrente.includes('/GS')) {
-                    gestionaleRiuscito = true;
-                    console.log(`✅ Gestionale sportivo riuscito al tentativo ${tentativo}`);
-                    break;
-                }
-            } catch (error) {
-                ultimoErrore = error.message;
-                console.log(`⚠️ Tentativo gestionale ${tentativo} fallito:`, error.message);
-                if (tentativo < MAX_TENTATIVI) {
-                    await new Promise(r => setTimeout(r, 2000 * tentativo));
-                    await page.goto(PORTALE_URL + '/bacheca', { waitUntil: 'networkidle2' });
-                }
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (e) {
+                console.log('⚠️ Errore reload bacheca:', e.message);
             }
         }
+    }
+}
 
-        if (!gestionaleRiuscito) {
-            const msg = `Impossibile aprire Gestionale sportivo dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
-            if (userId) {
-                await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
-            }
-            throw new Error(msg);
-        }
-
+if (!gestionaleRiuscito) {
+    const msg = `Impossibile aprire Gestionale sportivo dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
+    console.log(`❌ ${msg}`);
+    if (userId) {
+        await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+    }
+    throw new Error(msg);
+}
 // ============================================================
 // 3. SELEZIONE DISCIPLINA "STECCA" (CON ATTESA COLORAZIONE)
 // ============================================================
@@ -400,6 +497,7 @@ await new Promise(resolve => setTimeout(resolve, 1000));
 
         let idPortale = null;
         let garaTrovata = null;
+let nomeGara = iscrizione.gare.nome; // ← SALVA il nome per il retry
 
         try {
             await page.waitForFunction(
@@ -496,89 +594,134 @@ await new Promise(resolve => setTimeout(resolve, 1000));
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
-        // ============================================================
-        // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (CON RETRY)
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
+// ============================================================
+// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (CON RETRY LOCALE)
+// ============================================================
+console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
-        let navigazioneRiuscita = false;
-        let tentativi = 0;
-        ultimoErrore = null;
+let navigazioneRiuscita = false;
+let tentativiNav = 0;
+ultimoErrore = null;
 
-        while (tentativi < MAX_TENTATIVI && !navigazioneRiuscita) {
-            tentativi++;
-            console.log(`🔄 Tentativo ${tentativi}/${MAX_TENTATIVI}`);
+while (tentativiNav < MAX_TENTATIVI && !navigazioneRiuscita) {
+    tentativiNav++;
+    console.log(`🔄 Tentativo navigazione ${tentativiNav}/${MAX_TENTATIVI}`);
 
-            try {
-                await page.evaluate((rowId) => {
-                    const row = document.querySelector(`#${rowId}`);
-                    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }, garaTrovata.id);
-                await new Promise(resolve => setTimeout(resolve, 1500));
-
-                const menuAperto = await page.evaluate((rowId) => {
-                    const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
-                    if (!triggerEl) return false;
-                    
-                    const rect = triggerEl.getBoundingClientRect();
-                    const event = jQuery.Event('contextmenu', {
-                        pageX: rect.left + window.scrollX + rect.width / 2,
-                        pageY: rect.top + window.scrollY + rect.height / 2,
-                        clientX: rect.left + rect.width / 2,
-                        clientY: rect.top + rect.height / 2,
-                        target: triggerEl
-                    });
-                    jQuery(triggerEl).trigger(event);
-                    return true;
-                }, garaTrovata.id);
-
-                if (!menuAperto) throw new Error('Impossibile aprire il menu');
-                await new Promise(resolve => setTimeout(resolve, 500));
-
-                const navigato = await page.evaluate((rowId) => {
-                    const items = Array.from(document.querySelectorAll('.context-menu-item'));
-                    const targetItem = items.find(item => 
-                        item.textContent.trim().toLowerCase().includes('iscrizioni')
-                    );
-                    if (!targetItem) return false;
-                    
-                    const root = $(targetItem).data('contextMenuRoot');
-                    const key = $(targetItem).data('contextMenuKey');
-                    const $triggerRow = $(`#${rowId}`);
-                    if (!$triggerRow.length) return false;
-                    if (!root || !root.callback) return false;
-                    root.callback.call($triggerRow, key, root);
-                    return true;
-                }, garaTrovata.id);
-
-                if (!navigato) throw new Error('Impossibile chiamare il callback');
-
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA });
-                navigazioneRiuscita = true;
-                console.log(`✅ Navigazione riuscita al tentativo ${tentativi}`);
-                console.log(`📐 URL: ${page.url()}`);
-
-            } catch (error) {
-                console.error(`❌ Tentativo ${tentativi} fallito:`, error.message);
-                ultimoErrore = error.message;
-                
-                if (tentativi < MAX_TENTATIVI) {
-                    await new Promise(r => setTimeout(r, 1000 * tentativi));
-                    await page.reload({ waitUntil: 'networkidle2' });
+    try {
+        // 1. Se non è il primo tentativo, dobbiamo RITROVARE la gara
+        if (tentativiNav > 1) {
+            console.log('🔍 Ritrovo la gara nella tabella...');
+            
+            // Ricarica la pagina GS (senza rifare login!)
+            await page.reload({ waitUntil: 'networkidle2', timeout: 15000 });
+            
+            // Riapri il gestionale sportivo
+            await page.evaluate(() => {
+                const link = document.querySelector('a.expandfirst[href*="GS"]');
+                if (link) link.click();
+            });
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
+            
+            // RICERCA LA GARA DI NUOVO (NON rifare STECCA e filtri!)
+            console.log(`🔍 Ricerco di nuovo la gara: "${nomeGara}"`);
+            
+            // Attendi che la tabella sia caricata
+            await page.waitForSelector('#eventiDT tbody tr', { timeout: 15000 });
+            
+            // Cerca la gara
+            const nuovaGara = await page.evaluate((nomeGara) => {
+                const rows = document.querySelectorAll('#eventiDT tbody tr');
+                for (const row of rows) {
+                    if (row.textContent.includes(nomeGara)) {
+                        return { id: row.id, html: row.outerHTML };
+                    }
                 }
+                return null;
+            }, nomeGara);
+            
+            if (!nuovaGara) {
+                throw new Error(`Gara non trovata al tentativo ${tentativiNav}`);
             }
+            
+            // Aggiorna garaTrovata
+            garaTrovata = nuovaGara;
+            console.log(`✅ Gara ritrovata! ID: ${garaTrovata.id}`);
         }
 
-        if (!navigazioneRiuscita) {
-            if (userId) {
-                await sendWebSocketMessage(userId, 'ERRORE', {
-                    message: `Impossibile aprire la pagina delle iscrizioni dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore || 'errore sconosciuto'}`
-                });
-            }
-            throw new Error(`Impossibile navigare alla pagina iscrizioni dopo ${MAX_TENTATIVI} tentativi`);
-        }
+        // 2. Scroll alla riga
+        await page.evaluate((rowId) => {
+            const row = document.querySelector(`#${rowId}`);
+            if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, garaTrovata.id);
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-        console.log('✅ Step 7 completato!');
+        // 3. Apri il menu contestuale
+        const menuAperto = await page.evaluate((rowId) => {
+            const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
+            if (!triggerEl) return false;
+            
+            const rect = triggerEl.getBoundingClientRect();
+            const event = jQuery.Event('contextmenu', {
+                pageX: rect.left + window.scrollX + rect.width / 2,
+                pageY: rect.top + window.scrollY + rect.height / 2,
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+                target: triggerEl
+            });
+            jQuery(triggerEl).trigger(event);
+            return true;
+        }, garaTrovata.id);
+
+        if (!menuAperto) throw new Error('Impossibile aprire il menu');
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 4. Clicca su "Iscrizioni"
+        const navigato = await page.evaluate((rowId) => {
+            const items = Array.from(document.querySelectorAll('.context-menu-item'));
+            const targetItem = items.find(item => 
+                item.textContent.trim().toLowerCase().includes('iscrizioni')
+            );
+            if (!targetItem) return false;
+            
+            const root = $(targetItem).data('contextMenuRoot');
+            const key = $(targetItem).data('contextMenuKey');
+            const $triggerRow = $(`#${rowId}`);
+            if (!$triggerRow.length) return false;
+            if (!root || !root.callback) return false;
+            root.callback.call($triggerRow, key, root);
+            return true;
+        }, garaTrovata.id);
+
+        if (!navigato) throw new Error('Impossibile chiamare il callback');
+
+        // 5. Attendi la navigazione
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA });
+        navigazioneRiuscita = true;
+        console.log(`✅ Navigazione riuscita al tentativo ${tentativiNav}`);
+        console.log(`📐 URL: ${page.url()}`);
+
+    } catch (error) {
+        ultimoErrore = error.message;
+        console.log(`⚠️ Tentativo navigazione ${tentativiNav} fallito: ${ultimoErrore}`);
+        
+        if (tentativiNav < MAX_TENTATIVI) {
+            console.log(`⏳ Riprovo tra ${tentativiNav * 2} secondi...`);
+            await new Promise(r => setTimeout(r, 2000 * tentativiNav));
+            // Il loop ricomincerà e farà il reload + ricerca gara
+        }
+    }
+}
+
+if (!navigazioneRiuscita) {
+    const msg = `Impossibile aprire la pagina delle iscrizioni dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore || 'errore sconosciuto'}`;
+    console.log(`❌ ${msg}`);
+    if (userId) {
+        await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+    }
+    throw new Error(msg);
+}
+
+console.log('✅ Step 7 completato!');
 
         // ============================================================
         // 7.5 VERIFICA PRECOMPILAZIONE
