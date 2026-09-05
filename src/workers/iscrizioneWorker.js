@@ -222,7 +222,7 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
 // 3. SELEZIONE DISCIPLINA "STECCA" (CON ATTESA COLORAZIONE)
 // ============================================================
 // ============================================================
-// 3. SELEZIONE STECCA (VELOCE E SICURO) - VERSIONE RAZZO 🚀
+// 3. SELEZIONE STECCA (VELOCE E SICURO) - VERSIONE CORRETTA 🚀
 // ============================================================
 console.log('🐛 [DEBUG] Step 5: 🔍 Selezione STECCA...');
 
@@ -232,44 +232,53 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     try {
         console.log(`🔄 Tentativo ${tentativo}/${MAX_TENTATIVI}`);
 
-        // 1. Trova STECCA (con fallback multipli - 2 secondi max)
-        const btn = await page.evaluate(() => {
+        // 1. Trova E CLICCA STECCA (tutto in un'unica evaluate)
+        const clickRiuscito = await page.evaluate(() => {
             // Prova 1: Data attribute
-            let b = document.querySelector('button[data-disciplina="STECCA"]');
-            if (b) return b;
+            let btn = document.querySelector('button[data-disciplina="STECCA"]');
             
             // Prova 2: Classe + testo
-            const buttons = document.querySelectorAll('button.dtUP_sett');
-            b = Array.from(buttons).find(btn => 
-                btn.textContent?.trim().toUpperCase() === 'STECCA'
-            );
-            if (b) return b;
+            if (!btn) {
+                const buttons = document.querySelectorAll('button.dtUP_sett');
+                btn = Array.from(buttons).find(b => 
+                    b.textContent?.trim().toUpperCase() === 'STECCA'
+                );
+            }
             
             // Prova 3: Qualsiasi button
-            const allBtns = document.querySelectorAll('button');
-            b = Array.from(allBtns).find(btn => 
-                btn.textContent?.trim().toUpperCase() === 'STECCA'
-            );
-            return b || null;
+            if (!btn) {
+                const allBtns = document.querySelectorAll('button');
+                btn = Array.from(allBtns).find(b => 
+                    b.textContent?.trim().toUpperCase() === 'STECCA'
+                );
+            }
+            
+            // Se trovato, clicca
+            if (btn) {
+                btn.click();
+                return true;
+            }
+            return false;
         });
 
-        if (!btn) {
+        if (!clickRiuscito) {
             throw new Error('STECCA non trovato');
         }
-
-        // 2. Click (veloce, senza attese)
-        await page.evaluate((el) => el.click(), btn);
         console.log('✅ Click STECCA eseguito');
 
-        // 3. Verifica attivazione (max 3 secondi)
+        // 2. Verifica attivazione (max 3 secondi)
         const attivo = await page.waitForFunction(() => {
-            const b = document.querySelector('button.dtUP_sett');
-            if (!b) return false;
+            const buttons = document.querySelectorAll('button.dtUP_sett');
+            const btn = Array.from(buttons).find(b => 
+                b.textContent?.trim().toUpperCase() === 'STECCA'
+            );
+            
+            if (!btn) return false;
             
             // Controlli rapidi
-            return b.classList.contains('active') || 
-                   b.classList.contains('selected') ||
-                   b.getAttribute('aria-selected') === 'true' ||
+            return btn.classList.contains('active') || 
+                   btn.classList.contains('selected') ||
+                   btn.getAttribute('aria-selected') === 'true' ||
                    document.querySelector('select[name="stagione_f"]') !== null;
         }, { timeout: 3000 });
 
@@ -282,12 +291,24 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         break;
 
     } catch (error) {
-        ultimoErrore = error.message;  // ← USA quella già dichiarata
+        ultimoErrore = error.message;
         console.log(`⚠️ Tentativo ${tentativo} fallito: ${ultimoErrore}`);
         
         if (tentativo < MAX_TENTATIVI) {
+            console.log(`⏳ Ricarico prima del tentativo ${tentativo + 1}...`);
             await page.reload({ waitUntil: 'networkidle2', timeout: 10000 });
             await new Promise(r => setTimeout(r, 500));
+            
+            // Riapri il gestionale sportivo dopo il reload
+            try {
+                await page.evaluate(() => {
+                    const link = document.querySelector('a.expandfirst[href*="GS"]');
+                    if (link) link.click();
+                });
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
+            } catch (e) {
+                console.log('⚠️ Errore riapertura GS:', e.message);
+            }
         }
     }
 }
