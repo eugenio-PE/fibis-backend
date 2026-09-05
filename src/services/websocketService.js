@@ -87,22 +87,52 @@ case 'ISCRIZIONE_GIORNI_RICHIESTI':
     break;
 
         case 'ISCRIZIONE_GIORNO_SCELTO':
-            // L'utente ha scelto un giorno
-            const { iscrizioneId, giornoScelto } = data.payload;
-            console.log(`📨 [WS] Giorno scelto per iscrizione ${iscrizioneId}: ${giornoScelto}`);
-            
-            // Salva il giorno nel database
-            await supabaseAdmin
-                .from('iscrizioni_gare')
-                .update({ 
-                    giorno_iscrizione: giornoScelto,
-                    stato: 'in_attesa_completamento'
-                })
-                .eq('id', iscrizioneId);
-            
-            // Il worker sta già controllando il DB, quindi procederà
-            break;
-
+    // L'utente ha scelto un giorno
+    console.log(`📨 [WS] === RICEVUTO ISCRIZIONE_GIORNO_SCELTO ===`);
+    console.log(`📨 [WS] Payload ricevuto:`, JSON.stringify(data.payload, null, 2));
+    
+    const { iscrizioneId, giornoScelto } = data.payload;
+    console.log(`📨 [WS] iscrizioneId: ${iscrizioneId} (tipo: ${typeof iscrizioneId})`);
+    console.log(`📨 [WS] giornoScelto: "${giornoScelto}" (tipo: ${typeof giornoScelto})`);
+    
+    // ✅ VALIDAZIONE: controlla se i dati sono validi
+    if (!iscrizioneId) {
+        console.log(`❌ [WS] ERRORE: iscrizioneId mancante!`);
+        break;
+    }
+    if (!giornoScelto) {
+        console.log(`❌ [WS] ERRORE: giornoScelto mancante!`);
+        break;
+    }
+    
+    console.log(`🔍 [WS] Tentativo di aggiornare iscrizione ${iscrizioneId} con giorno: "${giornoScelto}"...`);
+    
+    try {
+        // ✅ AGGIUNTO .select() PER VEDERE IL RISULTATO
+        const { data: updateData, error: updateError } = await supabaseAdmin
+            .from('iscrizioni_gare')
+            .update({ 
+                giorno_iscrizione: giornoScelto,
+                stato: 'in_attesa_completamento'
+            })
+            .eq('id', iscrizioneId)
+            .select(); // ← IMPORTANTE! Per vedere cosa è stato aggiornato
+        
+        if (updateError) {
+            console.log(`❌ [WS] ERRORE UPDATE:`, updateError);
+            console.log(`❌ [WS] Dettaglio errore:`, JSON.stringify(updateError, null, 2));
+        } else {
+            console.log(`✅ [WS] UPDATE RIUSCITO!`);
+            console.log(`📊 [WS] Dati aggiornati:`, JSON.stringify(updateData, null, 2));
+            console.log(`📨 [WS] ✅ Giorno "${giornoScelto}" salvato per iscrizione ${iscrizioneId}`);
+        }
+    } catch (error) {
+        console.log(`❌ [WS] ECCEZIONE DURANTE UPDATE:`, error);
+        console.log(`❌ [WS] Stack:`, error.stack);
+    }
+    
+    console.log(`📨 [WS] === FINE ISCRIZIONE_GIORNO_SCELTO ===`);
+    break;
         default:
             console.log('⚠️ [WS] Tipo messaggio sconosciuto:', data.type);
     }
