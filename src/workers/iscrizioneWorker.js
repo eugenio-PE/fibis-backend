@@ -122,20 +122,21 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         await page.setViewport({ width: 1920, height: 1080 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-       // ============================================================
+// ============================================================
 // 1. LOGIN (VELOCE)
 // ============================================================
 console.log('🐛 [DEBUG] Step 1-3: 🔐 Login...');
 
 let loginRiuscito = false;
+let loginCompletato = false; // ✅ FLAG PER CHIUDERE DEFINITIVAMENTE IL LOOP
 
-for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI && !loginCompletato; tentativo++) {
     try {
         console.log(`🔄 Tentativo login ${tentativo}/${MAX_TENTATIVI}`);
         
         // Vai alla pagina di login
         await page.goto(PORTALE_URL, {
-            waitUntil: 'domcontentloaded', // ← più veloce di networkidle2
+            waitUntil: 'domcontentloaded',
             timeout: 10000
         });
         console.log(`🐛 [DEBUG] ✅ URL caricato: ${page.url()}`);
@@ -150,7 +151,7 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         // Click login e attendi navigazione
         await Promise.all([
             page.waitForNavigation({ 
-                waitUntil: 'domcontentloaded', // ← più veloce
+                waitUntil: 'domcontentloaded',
                 timeout: 15000 
             }),
             page.click('#edit-submit-1')
@@ -171,6 +172,8 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
             } catch (e) {
                 console.log('⚠️ Bacheca caricata ma alcuni elementi non trovati, continuo...');
             }
+            
+            loginCompletato = true; // ✅ CHIUDE DEFINITIVAMENTE IL LOOP
             break;
         }
     } catch (error) {
@@ -198,8 +201,9 @@ console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo...');
 
 let gestionaleRiuscito = false;
 let ultimoErroreGS = null;
+let gsCompletato = false; // ✅ FLAG PER CHIUDERE DEFINITIVAMENTE IL LOOP
 
-for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI && !gsCompletato; tentativo++) {
     try {
         console.log(`🔄 Tentativo GS ${tentativo}/${MAX_TENTATIVI}`);
 
@@ -255,6 +259,8 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
             }
 
             await new Promise(resolve => setTimeout(resolve, 500));
+            
+            gsCompletato = true; // ✅ CHIUDE DEFINITIVAMENTE IL LOOP
             break;
         }
 
