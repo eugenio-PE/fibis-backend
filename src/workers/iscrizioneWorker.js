@@ -883,32 +883,51 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                     console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
                     throw new Error('Tempo scaduto per la scelta dell\'esubero');
                 }
+} else {
+    console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
+    let giornoScelto = null;
+    const startTimeAttesa = Date.now();
+    const maxWaitTime = 60000;
+    let pollCount = 0;
+
+    while (Date.now() - startTimeAttesa < maxWaitTime) {
+        pollCount++;
+        const elapsed = ((Date.now() - startTimeAttesa) / 1000).toFixed(1);
+        
+        console.log(`🔍 [POLLING #${pollCount}] Tempo: ${elapsed}s - Lettura database...`);
+        
+        const { data: checkData, error: checkError } = await supabaseAdmin
+            .from('iscrizioni_gare')
+            .select('giorno_iscrizione, stato')
+            .eq('id', idIscrizione)
+            .single();
+
+        if (checkError) {
+            console.log(`⚠️ [POLLING #${pollCount}] Errore controllo DB:`, checkError.message);
+        } else {
+            console.log(`📊 [POLLING #${pollCount}] DATABASE LETTO:`);
+            console.log(`   - giorno_iscrizione: ${checkData?.giorno_iscrizione || 'null'}`);
+            console.log(`   - stato: ${checkData?.stato || 'null'}`);
+            
+            if (checkData.giorno_iscrizione) {
+                giornoScelto = checkData.giorno_iscrizione;
+                console.log(`✅ [POLLING #${pollCount}] ✅ GIORNO TROVATO! ➡️ ${giornoScelto}`);
+                console.log(`📊 [POLLING #${pollCount}] Tempo totale attesa: ${elapsed}s`);
+                break;
+            } else if (checkData.stato === 'annullata') {
+                console.log(`❌ [POLLING #${pollCount}] Iscrizione annullata dall'utente`);
+                throw new Error('Iscrizione annullata dall\'utente');
             } else {
-                console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
-                let giornoScelto = null;
-                const startTimeAttesa = Date.now();
-                const maxWaitTime = 60000;
+                console.log(`⏳ [POLLING #${pollCount}] Giorno ancora null, attendo...`);
+            }
+        }
 
-                while (Date.now() - startTimeAttesa < maxWaitTime) {
-                    const { data: checkData, error: checkError } = await supabaseAdmin
-                        .from('iscrizioni_gare')
-                        .select('giorno_iscrizione, stato')
-                        .eq('id', idIscrizione)
-                        .single();
-
-                    if (checkError) {
-                        console.log('⚠️ Errore controllo DB:', checkError.message);
-                    } else if (checkData.giorno_iscrizione) {
-                        giornoScelto = checkData.giorno_iscrizione;
-                        console.log(`✅ Giorno scelto dall'utente: ${giornoScelto}`);
-                        break;
-                    } else if (checkData.stato === 'annullata') {
-                        console.log('❌ Iscrizione annullata dall\'utente');
-                        throw new Error('Iscrizione annullata dall\'utente');
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
+        console.log(`⏳ [POLLING #${pollCount}] Attesa 1 secondo prima del prossimo poll...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    console.log(`📊 [POLLING] POLLING TERMINATO: ${pollCount} tentativi, tempo totale: ${((Date.now() - startTimeAttesa) / 1000).toFixed(1)}s`);
+    console.log(`📊 [POLLING] Giorno trovato: ${giornoScelto || 'NESSUN GIORNO TROVATO!'}`);
 
                 if (!giornoScelto) {
                     console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');
