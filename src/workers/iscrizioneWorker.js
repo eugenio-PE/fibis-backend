@@ -575,8 +575,8 @@ let nomeGara = iscrizione.gare.nome; // ← SALVA il nome per il retry
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
-// ============================================================
-// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (CON RETRY LOCALE)
+/// ============================================================
+// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (CON RETRY LOCALE MODIFICATO)
 // ============================================================
 console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
@@ -593,23 +593,17 @@ while (tentativiNav < MAX_TENTATIVI && !navigazioneRiuscita) {
         if (tentativiNav > 1) {
             console.log('🔍 Ritrovo la gara nella tabella...');
             
-            // Ricarica la pagina GS (senza rifare login!)
-            await page.reload({ waitUntil: 'networkidle2', timeout: 15000 });
-            
-            // Riapri il gestionale sportivo
-            await page.evaluate(() => {
-                const link = document.querySelector('a.expandfirst[href*="GS"]');
-                if (link) link.click();
-            });
-            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
-            
-            // RICERCA LA GARA DI NUOVO (NON rifare STECCA e filtri!)
-            console.log(`🔍 Ricerco di nuovo la gara: "${nomeGara}"`);
-            
+            // ✅ NON ricaricare la pagina! Usa la tabella già presente
             // Attendi che la tabella sia caricata
-            await page.waitForSelector('#eventiDT tbody tr', { timeout: 15000 });
+            try {
+                await page.waitForSelector('#eventiDT tbody tr', { timeout: 10000 });
+            } catch (e) {
+                // Se la tabella non c'è, prova a ricaricare la pagina corrente
+                console.log('⚠️ Tabella non trovata, ricarico la pagina...');
+                await page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
+            }
             
-            // Cerca la gara
+            // Cerca la gara nella tabella già presente
             const nuovaGara = await page.evaluate((nomeGara) => {
                 const rows = document.querySelectorAll('#eventiDT tbody tr');
                 for (const row of rows) {
@@ -624,7 +618,6 @@ while (tentativiNav < MAX_TENTATIVI && !navigazioneRiuscita) {
                 throw new Error(`Gara non trovata al tentativo ${tentativiNav}`);
             }
             
-            // Aggiorna garaTrovata
             garaTrovata = nuovaGara;
             console.log(`✅ Gara ritrovata! ID: ${garaTrovata.id}`);
         }
@@ -970,11 +963,24 @@ console.log('✅ Step 7 completato!');
                 try {
                     const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
                     if (btnSalva) {
-                        await Promise.all([
-                            page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
-                            btnSalva.click()
-                        ]);
-                        console.log('✅ Iscrizione salvata!');
+                        // ✅ Click e attendi eventuale navigazione, ma NON riavviare il flusso
+                        await btnSalva.click();
+                        
+                        // Aspetta un po' per il salvataggio
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        // Verifica che il salvataggio sia andato a buon fine
+                        const successo = await page.evaluate(() => {
+                            // Cerca messaggi di successo
+                            const msg = document.querySelector('.message-success, .alert-success, .success');
+                            return msg !== null;
+                        });
+                        
+                        if (successo) {
+                            console.log('✅ Iscrizione salvata con successo!');
+                        } else {
+                            console.log('⚠️ Salvataggio eseguito ma nessun messaggio di conferma');
+                        }
                     }
                 } catch (e) {
                     console.log('⚠️ Errore salvataggio:', e.message);
