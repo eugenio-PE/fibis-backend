@@ -192,114 +192,86 @@ if (!loginRiuscito) {
 }
 
 // ============================================================
-// 2. GESTIONALE SPORTIVO (INFIALLIBILE) 
+// 2. GESTIONALE SPORTIVO (DEFINITIVO - CON SELLETTORE ESATTO)
 // ============================================================
 console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo...');
 
 let gestionaleRiuscito = false;
+let ultimoErroreGS = null;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     try {
         console.log(`🔄 Tentativo GS ${tentativo}/${MAX_TENTATIVI}`);
 
-        // 1. Prima di tutto, aspetta che la bacheca sia completamente carica
+        // 1. Aspetta che la bacheca sia completamente caricata
+        console.log('⏳ Attesa caricamento bacheca...');
         await page.waitForFunction(() => {
             return document.readyState === 'complete';
-        }, { timeout: 5000 });
+        }, { timeout: 10000 });
 
-        // 2. Prova a trovare il link GS con MULTIPLI selettori
-        const linkTrovato = await page.evaluate(() => {
-            // Prova 1: Selettore originale
-            let link = document.querySelector('a.expandfirst[href*="GS"]');
-            
-            // Prova 2: Cerca per href che contiene GS
-            if (!link) {
-                link = document.querySelector('a[href*="/GS"]');
-            }
-            
-            // Prova 3: Cerca per testo
-            if (!link) {
-                const links = document.querySelectorAll('a');
-                for (const a of links) {
-                    if (a.textContent?.trim().toLowerCase().includes('gestionale sportivo')) {
-                        link = a;
-                        break;
-                    }
-                }
-            }
-            
-            // Prova 4: Cerca per classe (se il portale usa classi diverse)
-            if (!link) {
-                link = document.querySelector('a.menu-gs, a.gs-link, a[data-gs="true"]');
-            }
-            
+        // 2. Aspetta che il link GS sia presente nel DOM
+        console.log('⏳ Attesa link "Gestionale sportivo"...');
+        await page.waitForSelector('a.expandfirst[href*="GS"]', {
+            timeout: 10000,
+            visible: true
+        });
+
+        // 3. Clicca il link (con scroll per sicurezza)
+        await page.evaluate(() => {
+            const link = document.querySelector('a.expandfirst[href*="GS"]');
             if (link) {
+                link.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 link.click();
                 return true;
             }
             return false;
         });
 
-        if (!linkTrovato) {
-            // Log dello stato della pagina per debug
-            const stato = await page.evaluate(() => {
-                const links = Array.from(document.querySelectorAll('a')).slice(0, 10);
-                return {
-                    totalLinks: document.querySelectorAll('a').length,
-                    sampleLinks: links.map(a => ({
-                        text: a.textContent?.trim().slice(0, 30),
-                        href: a.href?.slice(0, 50),
-                        class: a.className
-                    }))
-                };
-            });
-            console.log('📊 Stato pagina:', JSON.stringify(stato, null, 2));
-            throw new Error('Link GS non trovato con nessun selettore');
-        }
+        console.log('✅ Click su "Gestionale sportivo" eseguito');
 
-        console.log('✅ Click GS eseguito');
+        // 4. Attendi la navigazione verso GS
+        await page.waitForNavigation({
+            waitUntil: 'domcontentloaded',
+            timeout: 15000
+        });
 
-        // 3. Attendi la navigazione (con fallback)
-        const navigato = await Promise.race([
-            page.waitForNavigation({ 
-                waitUntil: 'domcontentloaded', 
-                timeout: 15000 
-            }),
-            page.waitForSelector('button.dtUP_sett, select[name="stagione_f"]', { 
-                timeout: 15000,
-                visible: true 
-            }).then(() => true)
-        ]);
-
-        if (!navigato) {
-            throw new Error('Navigazione GS non completata');
-        }
-
+        // 5. VERIFICA: siamo su GS?
         const urlCorrente = page.url();
         if (urlCorrente.includes('/GS') || urlCorrente.includes('GS')) {
             gestionaleRiuscito = true;
-            console.log(`✅ Gestionale sportivo riuscito al tentativo ${tentativo}`);
-            console.log(`📐 URL GS: ${urlCorrente}`);
-            
-            // Piccola pausa per stabilizzazione (opzionale)
+            console.log(`✅ Gestionale sportivo aperto (tentativo ${tentativo})`);
+            console.log(`📐 URL: ${urlCorrente}`);
+
+            // 6. Aspetta che gli elementi di GS siano pronti
+            console.log('⏳ Attesa elementi GS...');
+            try {
+                await page.waitForSelector('button.dtUP_sett, select[name="stagione_f"]', {
+                    timeout: 10000,
+                    visible: true
+                });
+                console.log('✅ Elementi GS caricati');
+            } catch (e) {
+                console.log('⚠️ Elementi GS non trovati, ma continuo...');
+            }
+
             await new Promise(resolve => setTimeout(resolve, 500));
             break;
         }
 
     } catch (error) {
-        ultimoErrore = error.message;
-        console.log(`⚠️ Tentativo GS ${tentativo} fallito: ${ultimoErrore}`);
-        
+        ultimoErroreGS = error.message;
+        console.log(`⚠️ Tentativo GS ${tentativo} fallito: ${ultimoErroreGS}`);
+
         if (tentativo < MAX_TENTATIVI) {
             console.log(`⏳ Riprovo tra ${tentativo * 2} secondi...`);
             await new Promise(r => setTimeout(r, 2000 * tentativo));
-            // Torna alla bacheca e ricarica
             try {
-                await page.goto(PORTALE_URL + '/bacheca', { 
+                // Torna alla bacheca e ricarica
+                await page.goto(PORTALE_URL + '/bacheca', {
                     waitUntil: 'domcontentloaded',
-                    timeout: 10000 
+                    timeout: 10000
                 });
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 1000));
             } catch (e) {
                 console.log('⚠️ Errore reload bacheca:', e.message);
             }
@@ -307,14 +279,23 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     }
 }
 
+// 7. VERIFICA FINALE: siamo su GS?
 if (!gestionaleRiuscito) {
-    const msg = `Impossibile aprire Gestionale sportivo dopo ${MAX_TENTATIVI} tentativi: ${ultimoErrore}`;
-    console.log(`❌ ${msg}`);
-    if (userId) {
-        await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+    const urlCorrente = page.url();
+    if (urlCorrente.includes('/GS') || urlCorrente.includes('GS')) {
+        console.log('✅ La pagina è già su GS! Continuo...');
+        gestionaleRiuscito = true;
+    } else {
+        const msg = `Impossibile aprire GS dopo ${MAX_TENTATIVI} tentativi: ${ultimoErroreGS || 'errore sconosciuto'}`;
+        console.log(`❌ ${msg}`);
+        if (userId) {
+            await sendWebSocketMessage(userId, 'ERRORE', { message: msg });
+        }
+        throw new Error(msg);
     }
-    throw new Error(msg);
 }
+
+console.log('✅ GS pronto, continuo con STECCA...');
 // ============================================================
 // 3. SELEZIONE DISCIPLINA "STECCA" (CON ATTESA COLORAZIONE)
 // ============================================================
