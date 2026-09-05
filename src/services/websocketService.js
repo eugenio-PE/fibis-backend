@@ -86,7 +86,7 @@ case 'ISCRIZIONE_GIORNI_RICHIESTI':
     });
     break;
 
-        case 'ISCRIZIONE_GIORNO_SCELTO':
+case 'ISCRIZIONE_GIORNO_SCELTO':
     // L'utente ha scelto un giorno
     console.log(`📨 [WS] === RICEVUTO ISCRIZIONE_GIORNO_SCELTO ===`);
     console.log(`📨 [WS] Payload ricevuto:`, JSON.stringify(data.payload, null, 2));
@@ -105,14 +105,20 @@ case 'ISCRIZIONE_GIORNI_RICHIESTI':
         break;
     }
     
-    console.log(`🔍 [WS] Tentativo di aggiornare iscrizione ${iscrizioneId} con giorno: "${giornoScelto}"...`);
+    // ✅ CONVERTI LA DATA IN FORMATO ISO (YYYY-MM-DD)
+    // Da "25/09/2026" a "2026-09-25"
+    const dateParts = giornoScelto.split('/'); // ["25", "09", "2026"]
+    const giornoISO = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`; // "2026-09-25"
+    console.log(`🔄 [WS] Data convertita: "${giornoScelto}" → "${giornoISO}"`);
+    
+    console.log(`🔍 [WS] Tentativo di aggiornare iscrizione ${iscrizioneId} con giorno: "${giornoISO}"...`);
     
     try {
         // ✅ AGGIUNTO .select() PER VEDERE IL RISULTATO
         const { data: updateData, error: updateError } = await supabaseAdmin
             .from('iscrizioni_gare')
             .update({ 
-                giorno_iscrizione: giornoScelto,
+                giorno_iscrizione: giornoISO,  // ✅ USA IL FORMATO ISO!
                 stato: 'in_attesa_completamento'
             })
             .eq('id', iscrizioneId)
@@ -124,7 +130,7 @@ case 'ISCRIZIONE_GIORNI_RICHIESTI':
         } else {
             console.log(`✅ [WS] UPDATE RIUSCITO!`);
             console.log(`📊 [WS] Dati aggiornati:`, JSON.stringify(updateData, null, 2));
-            console.log(`📨 [WS] ✅ Giorno "${giornoScelto}" salvato per iscrizione ${iscrizioneId}`);
+            console.log(`📨 [WS] ✅ Giorno "${giornoISO}" salvato per iscrizione ${iscrizioneId}`);
         }
     } catch (error) {
         console.log(`❌ [WS] ECCEZIONE DURANTE UPDATE:`, error);
@@ -133,10 +139,6 @@ case 'ISCRIZIONE_GIORNI_RICHIESTI':
     
     console.log(`📨 [WS] === FINE ISCRIZIONE_GIORNO_SCELTO ===`);
     break;
-        default:
-            console.log('⚠️ [WS] Tipo messaggio sconosciuto:', data.type);
-    }
-}
 
 // ============================================================
 // INVIO MESSAGGI ALL'APP
