@@ -297,10 +297,7 @@ if (!gestionaleRiuscito) {
 
 console.log('✅ GS pronto, continuo con STECCA...');
 // ============================================================
-// 3. SELEZIONE DISCIPLINA "STECCA" (CON ATTESA COLORAZIONE)
-// ============================================================
-// ============================================================
-// 3. SELEZIONE STECCA (VERIFICA CLASSE CORRETTA) 🚀
+// 3. SELEZIONE STECCA (VERIFICA CLASSE CORRETTA + CONTROLLO URL) 🚀
 // ============================================================
 console.log('🐛 [DEBUG] Step 5: 🔍 Selezione STECCA...');
 
@@ -370,20 +367,31 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         ultimoErrore = error.message;
         console.log(`⚠️ Tentativo ${tentativo} fallito: ${ultimoErrore}`);
         
+        // ✅ CONTROLLO INTELLIGENTE: siamo su GS?
         if (tentativo < MAX_TENTATIVI) {
-            console.log(`⏳ Ricarico prima del tentativo ${tentativo + 1}...`);
-            await page.reload({ waitUntil: 'networkidle2', timeout: 10000 });
-            await new Promise(r => setTimeout(r, 500));
+            const urlCorrente = page.url();
             
-            // Riapri il gestionale sportivo dopo il reload
-            try {
-                await page.evaluate(() => {
-                    const link = document.querySelector('a.expandfirst[href*="GS"]');
-                    if (link) link.click();
-                });
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
-            } catch (e) {
-                console.log('⚠️ Errore riapertura GS:', e.message);
+            // Se siamo su GS (non su GS_accreditiEvento), possiamo fare retry
+            if (urlCorrente.includes('/GS') && !urlCorrente.includes('GS_accreditiEvento')) {
+                console.log(`⏳ Ricarico prima del tentativo ${tentativo + 1}...`);
+                await page.reload({ waitUntil: 'networkidle2', timeout: 10000 });
+                await new Promise(r => setTimeout(r, 500));
+                
+                // Riapri il gestionale sportivo dopo il reload
+                try {
+                    await page.evaluate(() => {
+                        const link = document.querySelector('a.expandfirst[href*="GS"]');
+                        if (link) link.click();
+                    });
+                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
+                } catch (e) {
+                    console.log('⚠️ Errore riapertura GS:', e.message);
+                }
+            } else {
+                // ✅ NON siamo su GS → NON fare il retry!
+                console.log(`⏳ Non sono su GS (${urlCorrente}), salto il retry`);
+                // Esci dal loop senza fare retry
+                break;
             }
         }
     }
@@ -397,7 +405,6 @@ if (!steccaRiuscita) {
     }
     throw new Error(msg);
 }
-
         // ============================================================
         // 4. IMPOSTA FILTRI (DINAMICI)
         // ============================================================
