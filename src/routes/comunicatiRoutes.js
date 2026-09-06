@@ -35,6 +35,14 @@ router.post('/', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'Permessi insufficienti' });
         }
 
+        // ✅ SCADENZA AUTOMATICA per dirette YouTube (1 ora)
+        let scadenzaFinale = data_scadenza || null;
+        if (tipo === 'diretta_youtube' && !scadenzaFinale) {
+            const dataScadenza = new Date(Date.now() + 60 * 60 * 1000); // 1 ora
+            scadenzaFinale = dataScadenza.toISOString();
+            console.log(`⏰ Scadenza automatica per diretta YouTube: ${scadenzaFinale}`);
+        }
+
         const { data, error } = await supabaseAdmin
             .from('comunicati')
             .insert({
@@ -42,7 +50,7 @@ router.post('/', authenticate, async (req, res) => {
                 contenuto,
                 destinatari,
                 priorita: priorita || 'normale',
-                data_scadenza: data_scadenza || null,
+                data_scadenza: scadenzaFinale,  // ← USA LA DATA CALCOLATA
                 pubblicato: true,
                 creato_da: user.id,
                 created_at: new Date().toISOString(),
@@ -60,7 +68,6 @@ router.post('/', authenticate, async (req, res) => {
         try {
             console.log(`📨 Invio notifiche push per comunicato ${data.id}: "${data.titolo}"`);
 
-            // 1. Recupera i token FCM attivi
             const { data: tokens, error: tokenError } = await supabaseAdmin
                 .from('device_tokens')
                 .select('fcm_token')
@@ -72,10 +79,8 @@ router.post('/', authenticate, async (req, res) => {
                 const tokenList = tokens.map(t => t.fcm_token);
                 console.log(`📱 Token FCM trovati: ${tokenList.length}`);
 
-                // 2. Importa il servizio Firebase
                 const { sendPushNotificationMultiple } = await import('../services/firebaseService.js');
 
-                // 3. Invia la notifica
                 await sendPushNotificationMultiple(
                     tokenList,
                     data.titolo,
@@ -92,7 +97,6 @@ router.post('/', authenticate, async (req, res) => {
             }
         } catch (pushError) {
             console.error('❌ Errore invio notifiche push:', pushError);
-            // Non bloccare la risposta se fallisce
         }
 
         res.status(201).json({ success: true, comunicato: data });
