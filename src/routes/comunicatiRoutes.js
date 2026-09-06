@@ -18,7 +18,7 @@ const ruoliMappa = {
 // ============================================================
 router.post('/', authenticate, async (req, res) => {
     try {
-        const { titolo, contenuto, destinatari, priorita, data_scadenza } = req.body;
+        const { titolo, contenuto, destinatari, priorita, data_scadenza, tipo, link } = req.body;
         const userId = req.user.id;
 
         const { data: user, error: userError } = await supabaseAdmin
@@ -45,13 +45,54 @@ router.post('/', authenticate, async (req, res) => {
                 data_scadenza: data_scadenza || null,
                 pubblicato: true,
                 creato_da: user.id,
-                created_at: new Date().toISOString()
+                created_at: new Date().toISOString(),
+                tipo: tipo || 'comunicato',
+                link: link || null
             })
             .select()
             .single();
 
         if (error) {
             return res.status(400).json({ error: error.message });
+        }
+
+        // ✅ INVIA NOTIFICHE PUSH AI DESTINATARI
+        try {
+            console.log(`📨 Invio notifiche push per comunicato ${data.id}: "${data.titolo}"`);
+
+            // 1. Recupera i token FCM attivi
+            const { data: tokens, error: tokenError } = await supabaseAdmin
+                .from('device_tokens')
+                .select('fcm_token')
+                .eq('is_active', true);
+
+            if (tokenError) {
+                console.error('❌ Errore recupero token FCM:', tokenError);
+            } else if (tokens && tokens.length > 0) {
+                const tokenList = tokens.map(t => t.fcm_token);
+                console.log(`📱 Token FCM trovati: ${tokenList.length}`);
+
+                // 2. Importa il servizio Firebase
+                const { sendPushNotificationMultiple } = await import('../services/firebaseService.js');
+
+                // 3. Invia la notifica
+                await sendPushNotificationMultiple(
+                    tokenList,
+                    data.titolo,
+                    data.contenuto?.substring(0, 100) || 'Nuovo comunicato disponibile',
+                    {
+                        tipo: 'comunicato',
+                        comunicato_id: String(data.id),
+                        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                    }
+                );
+                console.log(`✅ Notifiche push inviate per comunicato ${data.id}`);
+            } else {
+                console.log('ℹ️ Nessun token FCM attivo trovato');
+            }
+        } catch (pushError) {
+            console.error('❌ Errore invio notifiche push:', pushError);
+            // Non bloccare la risposta se fallisce
         }
 
         res.status(201).json({ success: true, comunicato: data });
