@@ -14,16 +14,92 @@ const ruoliMappa = {
 };
 
 // ============================================================
-// 1. CREA UN NUOVO COMUNICATO (SOLO ADMIN)
+// 0. API PER I DROPDOWN (NUOVE)
+// ============================================================
+
+// GET /regioni - Ottieni tutte le regioni uniche da asd_centri
+router.get('/regioni', authenticate, async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('asd_centri')
+            .select('regione')
+            .not('regione', 'is', null)
+            .neq('regione', '')
+            .order('regione');
+
+        if (error) throw error;
+
+        // Estrai valori unici
+        const regioniUniche = [...new Set(data.map(t => t.regione))].sort();
+        const result = regioniUniche.map(regione => ({
+            id: regione,
+            nome: regione,
+            sigla: regione.substring(0, 2).toUpperCase()
+        }));
+
+        res.json({ success: true, regioni: result });
+    } catch (error) {
+        console.error('❌ Errore recupero regioni:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /province/:regione - Ottieni province per regione
+router.get('/province/:regione', authenticate, async (req, res) => {
+    try {
+        const { regione } = req.params;
+
+        const { data, error } = await supabaseAdmin
+            .from('asd_centri')
+            .select('provincia')
+            .eq('regione', regione)
+            .not('provincia', 'is', null)
+            .neq('provincia', '')
+            .order('provincia');
+
+        if (error) throw error;
+
+        const provinceUniche = [...new Set(data.map(t => t.provincia))].sort();
+        const result = provinceUniche.map(provincia => ({
+            id: provincia,
+            nome: provincia,
+            sigla: provincia.substring(0, 2).toUpperCase()
+        }));
+
+        res.json({ success: true, province: result });
+    } catch (error) {
+        console.error('❌ Errore recupero province:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /asd - Ottieni tutte le ASD (PER ADMIN - già esiste in adminRoutes, ma la mettiamo per completezza)
+router.get('/asd', authenticate, async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('asd_centri')
+            .select('id, nome, regione, provincia')
+            .order('nome');
+
+        if (error) throw error;
+        res.json({ success: true, asd: data });
+    } catch (error) {
+        console.error('❌ Errore recupero ASD:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// 1. CREA UN NUOVO COMUNICATO (ADMIN O PRESIDENTE)
 // ============================================================
 router.post('/', authenticate, async (req, res) => {
     try {
-        const { titolo, contenuto, destinatari, priorita, data_scadenza, tipo, link } = req.body;
+        const { titolo, contenuto, destinatari, priorita, data_scadenza, tipo, link, filtro_regione, filtro_provincia, filtro_asd_id } = req.body;
         const userId = req.user.id;
 
         const { data: user, error: userError } = await supabaseAdmin
             .from('manutentori')
-            .select('id, ruolo')
+            .select('id, ruolo, asd_id')
             .eq('user_id', userId)
             .single();
 
@@ -31,8 +107,31 @@ router.post('/', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'Non autorizzato' });
         }
 
-        if (!['admin', 'presidente'].includes(user.ruolo)) {
+        const isAdmin = user.ruolo === 'admin';
+        const isPresidente = user.ruolo === 'presidente';
+
+        if (!isAdmin && !isPresidente) {
             return res.status(403).json({ error: 'Permessi insufficienti' });
+        }
+
+        // 🔐 SE È PRESIDENTE → FORZA i filtri sulla sua ASD
+        let filtroRegioneFinale = filtro_regione || null;
+        let filtroProvinciaFinale = filtro_provincia || null;
+        let filtroAsdFinale = filtro_asd_id || null;
+        let destinatariFinali = destinatari;
+
+        if (isPresidente) {
+            if (!user.asd_id) {
+                return res.status(400).json({ error: 'Presidente senza ASD associata' });
+            }
+            // Forza il filtro ASD
+            filtroAsdFinale = user.asd_id;
+            // Forza destinatari: solo tesserati
+            destinatariFinali = ['tesserati'];
+            // Ignora filtri geografici
+            filtroRegioneFinale = null;
+            filtroProvinciaFinale = null;
+            console.log(`🔐 Presidente ASD ${user.asd_id}: comunicato limitato ai suoi tesserati`);
         }
 
         // ✅ SCADENZA AUTOMATICA per dirette YouTube (1 ora)
@@ -48,14 +147,17 @@ router.post('/', authenticate, async (req, res) => {
             .insert({
                 titolo,
                 contenuto,
-                destinatari,
+                destinatari: destinatariFinali,
                 priorita: priorita || 'normale',
-                data_scadenza: scadenzaFinale,  // ← USA LA DATA CALCOLATA
+                data_scadenza: scadenzaFinale,
                 pubblicato: true,
                 creato_da: user.id,
                 created_at: new Date().toISOString(),
                 tipo: tipo || 'comunicato',
-                link: link || null
+                link: link || null,
+                filtro_regione: filtroRegioneFinale,
+                filtro_provincia: filtroProvinciaFinale,
+                filtro_asd_id: filtroAsdFinale
             })
             .select()
             .single();
@@ -145,15 +247,16 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 3. OTTIENI I COMUNICATI PER UN UTENTE (USA RPC)
+// 3. OTTIENI I COMUNICATI PER UN UTENTE (CON FILTRI - OTTIMIZZATO)
 // ============================================================
 router.get('/', authenticate, async (req, res) => {
     try {
         const userId = req.user.id;
 
+        // 1. Recupera il ruolo e asd_id dell'utente
         const { data: user, error: userError } = await supabaseAdmin
             .from('manutentori')
-            .select('ruolo')
+            .select('ruolo, asd_id')
             .eq('user_id', userId)
             .maybeSingle();
 
@@ -162,11 +265,46 @@ router.get('/', authenticate, async (req, res) => {
         }
 
         const ruolo = user?.ruolo || 'tesserato';
+        const isAdmin = ruolo === 'admin';
 
-        let comunicati;
+        // 2. Recupera i dati dell'utente UNA SOLA VOLTA (per i filtri)
+        let userData = null;
 
-        // ✅ SE ADMIN → PRENDE TUTTI
-        if (ruolo === 'admin') {
+        if (ruolo === 'tesserato') {
+            // Per i tesserati → prendi da tesserati
+            const { data, error } = await supabaseAdmin
+                .from('tesserati')
+                .select('regione, provincia, asd_id')
+                .eq('id', userId)
+                .maybeSingle();
+
+            if (!error && data) {
+                userData = data;
+            }
+        } else {
+            // Per manutentori, direttori, presidenti → prendi da asd_centri tramite asd_id
+            if (user?.asd_id) {
+                const { data, error } = await supabaseAdmin
+                    .from('asd_centri')
+                    .select('regione, provincia')
+                    .eq('id', user.asd_id)
+                    .maybeSingle();
+
+                if (!error && data) {
+                    userData = {
+                        regione: data.regione,
+                        provincia: data.provincia,
+                        asd_id: user.asd_id
+                    };
+                }
+            }
+        }
+
+        // 3. Recupera i comunicati
+        let comunicatiBase;
+
+        if (isAdmin) {
+            // Admin → tutti i comunicati
             const { data, error } = await supabaseAdmin
                 .from('comunicati')
                 .select('*')
@@ -176,9 +314,9 @@ router.get('/', authenticate, async (req, res) => {
             if (error) {
                 return res.status(400).json({ error: error.message });
             }
-            comunicati = data;
+            comunicatiBase = data;
         } else {
-            // ✅ PER GLI ALTRI → FILTRA PER RUOLO
+            // Altri ruoli → usa RPC
             const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
             console.log(`🔍 Ruolo: ${ruolo} → normalizzato: ${ruoloNormalizzato}`);
 
@@ -189,11 +327,44 @@ router.get('/', authenticate, async (req, res) => {
                 console.error('❌ Errore RPC:', error);
                 return res.status(400).json({ error: error.message });
             }
-            comunicati = data;
+            comunicatiBase = data;
         }
 
-        // ✅ CONTA LE LETTURE PER OGNI COMUNICATO
-        const comunicatiConConteggio = await Promise.all(comunicati.map(async (c) => {
+        // 4. Applica filtri geografici (in memoria)
+        const comunicatiFiltrati = comunicatiBase.filter(comunicato => {
+            // Se non ha filtri, è visibile a tutti
+            if (!comunicato.filtro_regione && 
+                !comunicato.filtro_provincia && 
+                !comunicato.filtro_asd_id) {
+                return true;
+            }
+
+            // Se ha filtri ma non abbiamo dati utente, escludi
+            if (!userData) return false;
+
+            // Verifica regione
+            if (comunicato.filtro_regione && 
+                userData.regione !== comunicato.filtro_regione) {
+                return false;
+            }
+
+            // Verifica provincia
+            if (comunicato.filtro_provincia && 
+                userData.provincia !== comunicato.filtro_provincia) {
+                return false;
+            }
+
+            // Verifica ASD
+            if (comunicato.filtro_asd_id && 
+                userData.asd_id !== comunicato.filtro_asd_id) {
+                return false;
+            }
+
+            return true;
+        });
+
+        // 5. CONTA LE LETTURE PER OGNI COMUNICATO
+        const comunicatiConConteggio = await Promise.all(comunicatiFiltrati.map(async (c) => {
             const { count, error } = await supabaseAdmin
                 .from('comunicati_letti')
                 .select('*', { count: 'exact', head: true })
@@ -207,7 +378,7 @@ router.get('/', authenticate, async (req, res) => {
             return { ...c, letti_count: count || 0 };
         }));
 
-        // Recupera i comunicati già letti da questo utente
+        // 6. Recupera i comunicati già letti da questo utente
         const { data: letti, error: lettiError } = await supabaseAdmin
             .from('comunicati_letti')
             .select('comunicato_id')
@@ -280,7 +451,7 @@ router.get('/non-letti', authenticate, async (req, res) => {
 
         const { data: user, error: userError } = await supabaseAdmin
             .from('manutentori')
-            .select('ruolo')
+            .select('ruolo, asd_id')
             .eq('user_id', userId)
             .maybeSingle();
 
@@ -289,7 +460,6 @@ router.get('/non-letti', authenticate, async (req, res) => {
         }
 
         const ruolo = user?.ruolo || 'tesserato';
-        // ✅ NORMALIZZA IL RUOLO (singolare → plurale)
         const ruoloNormalizzato = ruoliMappa[ruolo] || ruolo;
 
         // ✅ USA RPC PER IL FILTRO
