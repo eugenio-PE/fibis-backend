@@ -9,7 +9,8 @@ import {
     importTesseratiFromCSV,
     addStecca,
     getStecche,
-    uploadLogo  // ← AGGIUNTO
+    uploadLogo,
+    createTesseratoWithAuth   // ← AGGIUNTO
 } from '../controllers/tesseratiController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
@@ -25,7 +26,7 @@ router.get('/:id', authenticate, getTesseratoById);
 router.get('/user/:userId', authenticate, getTesseratoByUserId);
 
 // Rotta per creare un nuovo tesserato (POST)
-router.post('/', authenticate, requireRole(['admin', 'presidente']), createTesserato);
+router.post('/', authenticate, requireRole(['admin', 'presidente']), createTesseratoWithAuth);
 
 // Rotta per aggiornare un tesserato (PUT)
 router.put('/:id', authenticate, requireRole(['admin', 'presidente']), updateTesserato);

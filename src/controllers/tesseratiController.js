@@ -566,3 +566,133 @@ export const getTesseratoByUserId = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+// ============================================================
+// 🔥 NUOVA FUNZIONE: POST /api/tesserati (CON AUTH)
+// Crea un nuovo tesserato E crea l'utente in Supabase Auth
+// ============================================================
+export const createTesseratoWithAuth = async (req, res) => {
+  try {
+    const {
+      asd_id,
+      nome,
+      cognome,
+      data_nascita,
+      codice_fiscale,
+      email,
+      telefono,
+      disciplina,
+      categoria,
+      data_tesseramento,
+      data_scadenza,
+      foto_url,
+      stato = 'attivo',
+      consenso_privacy = false,
+      consenso_ranking = false,
+      stagione,
+      sesso,
+      matricola,
+      codice_tessera,
+      tipo_tessera,
+      qualifica,
+      livello,
+      categoria_ranking
+    } = req.body;
+
+    // Validazione base
+    if (!nome || !cognome || !asd_id) {
+      return res.status(400).json({ error: 'Nome, cognome e ASD sono obbligatori' });
+    }
+
+    // Verifica matricola univoca (se fornita)
+    if (matricola) {
+      const { data: existing } = await supabaseAdmin
+        .from('tesserati')
+        .select('id')
+        .eq('matricola', matricola)
+        .maybeSingle();
+      
+      if (existing) {
+        return res.status(400).json({ error: 'Matricola già esistente' });
+      }
+    }
+
+    // 1. INSERISCI IL TESSERATO
+    const { data, error } = await supabaseAdmin
+      .from('tesserati')
+      .insert({
+        asd_id,
+        nome,
+        cognome,
+        data_nascita,
+        codice_fiscale,
+        email,
+        telefono,
+        disciplina,
+        categoria,
+        data_tesseramento,
+        data_scadenza,
+        foto_url,
+        stato,
+        consenso_privacy,
+        consenso_ranking,
+        stagione,
+        sesso,
+        matricola,
+        codice_tessera,
+        tipo_tessera,
+        qualifica,
+        livello,
+        categoria_ranking
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // 2. ✅ CREA L'UTENTE IN SUPABASE AUTH
+    if (email) {
+      try {
+        const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+          email: email,
+          password: 'PasswordTemporanea123!',
+          options: {
+            data: {
+              nome: nome,
+              cognome: cognome,
+              ruolo: 'tesserato'
+            }
+          }
+        });
+
+        if (authError) {
+          console.error('❌ Errore creazione utente Auth:', authError);
+        } else if (authData?.user) {
+          // ✅ AGGIORNA IL TESSERATO CON user_id
+          const { error: updateError } = await supabaseAdmin
+            .from('tesserati')
+            .update({ user_id: authData.user.id })
+            .eq('id', data.id);
+
+          if (updateError) {
+            console.error('❌ Errore aggiornamento user_id:', updateError);
+          } else {
+            console.log(`✅ Utente Auth creato per tesserato ${data.id}: ${email}`);
+          }
+        }
+      } catch (authError) {
+        console.error('❌ Errore durante creazione Auth:', authError);
+        // Il tesserato è già stato creato, continuiamo
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Tesserato creato con successo',
+      data
+    });
+
+  } catch (error) {
+    console.error('❌ Errore createTesseratoWithAuth:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
