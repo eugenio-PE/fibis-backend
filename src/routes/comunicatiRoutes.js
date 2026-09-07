@@ -17,8 +17,8 @@ const ruoliMappa = {
 // 0. API PER I DROPDOWN (NUOVE)
 // ============================================================
 
-// GET /regioni - Ottieni tutte le regioni uniche da asd_centri
-router.get('/regioni', authenticate, async (req, res) => {
+// GET /comunicati/regioni - Ottieni tutte le regioni uniche da asd_centri
+router.get('/comunicati/regioni', authenticate, async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('asd_centri')
@@ -44,8 +44,8 @@ router.get('/regioni', authenticate, async (req, res) => {
     }
 });
 
-// GET /province/:regione - Ottieni province per regione
-router.get('/province/:regione', authenticate, async (req, res) => {
+// GET /comunicati/province/:regione - Ottieni province per regione
+router.get('/comunicati/province/:regione', authenticate, async (req, res) => {
     try {
         const { regione } = req.params;
 
@@ -73,8 +73,9 @@ router.get('/province/:regione', authenticate, async (req, res) => {
     }
 });
 
-// GET /asd - Ottieni tutte le ASD (PER ADMIN - già esiste in adminRoutes, ma la mettiamo per completezza)
-router.get('/asd', authenticate, async (req, res) => {
+// GET /comunicati/asd - Ottieni tutte le ASD
+// NOTA: /asd esiste già in interventoRoutes.js, ma la mettiamo per completezza
+router.get('/comunicati/asd', authenticate, async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('asd_centri')
@@ -88,7 +89,6 @@ router.get('/asd', authenticate, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
 // ============================================================
 // 1. CREA UN NUOVO COMUNICATO (ADMIN O PRESIDENTE)
 // ============================================================
