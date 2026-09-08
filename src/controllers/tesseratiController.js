@@ -363,14 +363,58 @@ export const importTesseratiFromCSV = async (req, res) => {
                     }
                 }
 
-                const { error } = await supabaseAdmin
+                // 1. INSERISCI IL TESSERATO
+                const { data: newTesserato, error: insertError } = await supabaseAdmin
                     .from('tesserati')
-                    .insert(data);
+                    .insert(data)
+                    .select()
+                    .single();
 
-                if (error) throw error;
+                if (insertError) throw insertError;
+
+                // 2. ✅ CREA L'UTENTE IN AUTH (SOLO SE HA EMAIL)
+                if (data.email) {
+                    try {
+                        // ============================================================
+                        // ⚠️ ATTENZIONE: QUESTO CODICE È PROVVISORIO PER TEST!
+                        // IN PRODUZIONE ABILITARE L'INVIO MAIL E USARE signUp()
+                        // ============================================================
+                        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+                            email: data.email,
+                            password: 'PasswordTemporanea123!',
+                            email_confirm: true,
+                            user_metadata: {
+                                nome: data.nome,
+                                cognome: data.cognome,
+                                ruolo: 'tesserato'
+                            }
+                        });
+
+                        if (authError) {
+                            console.error(`❌ Errore creazione utente Auth per ${data.email}:`, authError);
+                        } else if (authData?.user) {
+                            // ✅ AGGIORNA IL TESSERATO CON user_id
+                            await supabaseAdmin
+                                .from('tesserati')
+                                .update({ user_id: authData.user.id })
+                                .eq('id', newTesserato.id);
+                            
+                            console.log(`✅ Utente Auth creato per ${data.email}`);
+                        }
+                    } catch (authError) {
+                        console.error(`❌ Errore durante creazione Auth per ${data.email}:`, authError);
+                    }
+                }
 
                 results.success++;
-                results.details.push({ matricola: data.matricola, nome: data.nome, cognome: data.cognome, status: 'ok' });
+                results.details.push({ 
+                    matricola: data.matricola, 
+                    nome: data.nome, 
+                    cognome: data.cognome, 
+                    user_id: newTesserato.user_id || null,
+                    status: 'ok' 
+                });
+
             } catch (error) {
                 results.errors++;
                 results.details.push({ 
@@ -649,41 +693,66 @@ export const createTesseratoWithAuth = async (req, res) => {
 
     if (error) throw error;
 
-    // 2. ✅ CREA L'UTENTE IN SUPABASE AUTH
-    if (email) {
-      try {
-        const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-          email: email,
-          password: 'PasswordTemporanea123!',
-          options: {
-            data: {
-              nome: nome,
-              cognome: cognome,
-              ruolo: 'tesserato'
+ // 2. ✅ CREA L'UTENTE IN SUPABASE AUTH
+if (email) {
+    try {
+        // ============================================================
+        // ⚠️  ATTENZIONE: QUESTO CODICE È PROVVISORIO PER TEST!
+        // ============================================================
+        // 
+        // STIAMO USANDO `admin.createUser()` PER BYPASSARE LA CONFERMA EMAIL.
+        // QUESTO PERMETTE DI CREARE TESSERATI CON EMAIL FINZIE DURANTE LO SVILUPPO.
+        //
+        // 🔴 IN PRODUZIONE (CON UTENTI REALI) DEVI:
+        // 1. ABILITARE L'INVIO MAIL DA SUPABASE
+        // 2. TORNARE A USARE `supabaseAdmin.auth.signUp()` (IL METODO STANDARD)
+        // 3. RIMUOVERE `email_confirm: true`
+        //
+        // LA CONFIGURAZIONE CORRETTA PER PRODUZIONE È:
+        // const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+        //     email: email,
+        //     password: 'PasswordTemporanea123!',
+        //     options: {
+        //         data: {
+        //             nome: nome,
+        //             cognome: cognome,
+        //             ruolo: 'tesserato'
+        //         }
+        //     }
+        // });
+        // ============================================================
+        
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+            email: email,
+            password: 'PasswordTemporanea123!',
+            email_confirm: true,  // ← CONFERMA AUTOMATICA (salta l'invio email)
+            user_metadata: {
+                nome: nome,
+                cognome: cognome,
+                ruolo: 'tesserato'
             }
-          }
         });
 
         if (authError) {
-          console.error('❌ Errore creazione utente Auth:', authError);
+            console.error('❌ Errore creazione utente Auth:', authError);
         } else if (authData?.user) {
-          // ✅ AGGIORNA IL TESSERATO CON user_id
-          const { error: updateError } = await supabaseAdmin
-            .from('tesserati')
-            .update({ user_id: authData.user.id })
-            .eq('id', data.id);
+            // ✅ AGGIORNA IL TESSERATO CON user_id
+            const { error: updateError } = await supabaseAdmin
+                .from('tesserati')
+                .update({ user_id: authData.user.id })
+                .eq('id', data.id);
 
-          if (updateError) {
-            console.error('❌ Errore aggiornamento user_id:', updateError);
-          } else {
-            console.log(`✅ Utente Auth creato per tesserato ${data.id}: ${email}`);
-          }
+            if (updateError) {
+                console.error('❌ Errore aggiornamento user_id:', updateError);
+            } else {
+                console.log(`✅ Utente Auth creato per tesserato ${data.id}: ${email}`);
+            }
         }
-      } catch (authError) {
+    } catch (authError) {
         console.error('❌ Errore durante creazione Auth:', authError);
         // Il tesserato è già stato creato, continuiamo
-      }
     }
+}
 
     res.status(201).json({
       success: true,
