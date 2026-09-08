@@ -459,7 +459,7 @@ function mapQualificaToDisciplina(qualifica) {
 export const addStecca = async (req, res) => {
     try {
         const { id } = req.params;
-        const { marca, modello, tipo_marca, peso, lunghezza, materiale } = req.body;
+        const { marca, modello, tipo_marca, peso, lunghezza, materiale, foto_url, link } = req.body;
 
         if (!marca) {
             return res.status(400).json({ error: 'La marca è obbligatoria' });
@@ -484,7 +484,9 @@ export const addStecca = async (req, res) => {
                 tipo_marca,
                 peso,
                 lunghezza,
-                materiale
+                materiale,
+                foto_url: foto_url || null,
+                link: link || null
             })
             .select()
             .single();
@@ -501,7 +503,6 @@ export const addStecca = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
-
 // ============================================================
 // GET /api/tesserati/:id/stecca
 // Recupera tutte le stecche di un tesserato
