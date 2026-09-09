@@ -3,6 +3,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import puppeteer from 'puppeteer';
 import dotenv from 'dotenv';
 import { getCredenzialiPerPuppeteer } from '../controllers/credenzialiController.js';
+import fs from 'fs';
+import path from 'path';
 dotenv.config();
 
 // ============================================================
@@ -11,6 +13,17 @@ dotenv.config();
 const PORTALE_URL = 'https://tesseramento.fibis.it';
 const MAX_TENTATIVI = 3;
 const TIMEOUT_ATTESA = 30000;
+
+// Funzione helper per normalizzare i testi prima del confronto
+const normalizzaTesto = (testo) => {
+    if (!testo) return '';
+    return testo
+        .toLowerCase()
+        .replace(/["'“”«»]/g, '')   // Rimuove tutte le tipologie di virgolette e apici
+        .replace(/[\^°]/g, '')       // Rimuove simboli di grado/accenti
+        .replace(/\s+/g, ' ')        // Riduce spazi multipli a spazio singolo
+        .trim();
+};
 
 // ============================================================
 // FUNZIONE DI UTILITY PER INVIARE MESSAGGI WEBSOCKET
@@ -35,6 +48,7 @@ async function sendWebSocketMessage(userId, type, payload) {
 // FUNZIONE PRINCIPALE
 // ============================================================
 export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null) {
+    let isAborted = false; // ← AGGIUNGI QUESTA RIGA
     console.log(`🔄 [ISCRIZIONE WORKER] Avvio iscrizione ${idIscrizione}...`);
     const startTime = Date.now();
 
@@ -130,6 +144,12 @@ console.log('🐛 [DEBUG] Step 1-3: 🔐 Login...');
 let loginRiuscito = false;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    // ✅ FIX: Se abortito, esci subito
+    if (isAborted) {
+        console.log('🛑 Worker abortito, interrompo retry login.');
+        break;
+    }
+    
     try {
         console.log(`🔄 Tentativo login ${tentativo}/${MAX_TENTATIVI}`);
         
@@ -188,6 +208,12 @@ let gestionaleRiuscito = false;
 let ultimoErroreGS = null;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    // ✅ FIX: Se abortito, esci subito
+    if (isAborted) {
+        console.log('🛑 Worker abortito, interrompo retry GS.');
+        break;
+    }
+    
     try {
         console.log(`🔄 Tentativo GS ${tentativo}/${MAX_TENTATIVI}`);
 
@@ -271,6 +297,12 @@ console.log('🐛 [DEBUG] Step 5: 🔍 Selezione STECCA...');
 let steccaRiuscita = false;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    // ✅ FIX: Se abortito, esci subito
+    if (isAborted) {
+        console.log('🛑 Worker abortito, interrompo retry STECCA.');
+        break;
+    }
+    
     try {
         console.log(`🔄 Tentativo ${tentativo}/${MAX_TENTATIVI}`);
 
@@ -444,33 +476,53 @@ console.log('✅ Lista gare caricata!');
 await new Promise(resolve => setTimeout(resolve, 1000));
 
         // ============================================================
-        // 6. CERCA LA GARA NELLA LISTA (CON FALLBACK)
+        // 6. CERCA LA GARA NELLA LISTA (CON FALLBACK) - MODIFICATO CON normalizzaTesto()
         // ============================================================
         console.log(`🐛 [DEBUG] Step 8: 🔍 Ricerca gara: "${iscrizione.gare.nome}"`);
 
         let idPortale = null;
         let garaTrovata = null;
-let nomeGara = iscrizione.gare.nome; // ← SALVA il nome per il retry
+        let nomeGara = iscrizione.gare.nome;
 
         try {
+            // ✅ FIX: Normalizza il nome per il confronto
+            const nomeCercatoPulito = normalizzaTesto(nomeGara);
+            console.log(`📌 Nome normalizzato: "${nomeCercatoPulito}"`);
+            
             await page.waitForFunction(
-                (nomeGara) => {
+                (nomeCercatoPulito) => {
                     const rows = document.querySelectorAll('#eventiDT tbody tr');
-                    return Array.from(rows).some(row => row.textContent.includes(nomeGara));
+                    return Array.from(rows).some(row => {
+                        const testoRiga = row.textContent;
+                        const testoPulito = testoRiga
+                            .toLowerCase()
+                            .replace(/["'“”«»]/g, '')
+                            .replace(/[\^°]/g, '')
+                            .replace(/\s+/g, ' ')
+                            .trim();
+                        return testoPulito.includes(nomeCercatoPulito);
+                    });
                 },
                 { timeout: 10000, polling: 300 },
-                iscrizione.gare.nome
+                nomeCercatoPulito
             );
 
-            garaTrovata = await page.evaluate((nomeGara) => {
+            garaTrovata = await page.evaluate((nomeCercatoPulito) => {
                 const rows = document.querySelectorAll('#eventiDT tbody tr');
                 for (const row of rows) {
-                    if (row.textContent.includes(nomeGara)) {
+                    const testoRiga = row.textContent;
+                    const testoPulito = testoRiga
+                        .toLowerCase()
+                        .replace(/["'“”«»]/g, '')
+                        .replace(/[\^°]/g, '')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+                    if (testoPulito.includes(nomeCercatoPulito)) {
                         return { id: row.id, html: row.outerHTML };
                     }
                 }
                 return null;
-            }, iscrizione.gare.nome);
+            }, nomeCercatoPulito);
 
             console.log(`✅ Gara trovata! ID riga: ${garaTrovata?.id}`);
 
@@ -488,23 +540,39 @@ let nomeGara = iscrizione.gare.nome; // ← SALVA il nome per il retry
                 await page.waitForSelector('#eventiDT tbody tr', { timeout: 10000 });
                 
                 await page.waitForFunction(
-                    (nomeGara) => {
+                    (nomeCercatoPulito) => {
                         const rows = document.querySelectorAll('#eventiDT tbody tr');
-                        return Array.from(rows).some(row => row.textContent.includes(nomeGara));
+                        return Array.from(rows).some(row => {
+                            const testoRiga = row.textContent;
+                            const testoPulito = testoRiga
+                                .toLowerCase()
+                                .replace(/["'“”«»]/g, '')
+                                .replace(/[\^°]/g, '')
+                                .replace(/\s+/g, ' ')
+                                .trim();
+                            return testoPulito.includes(nomeCercatoPulito);
+                        });
                     },
                     { timeout: 10000, polling: 300 },
-                    iscrizione.gare.nome
+                    nomeCercatoPulito
                 );
 
-                const garaTrovataFallback = await page.evaluate((nomeGara) => {
+                const garaTrovataFallback = await page.evaluate((nomeCercatoPulito) => {
                     const rows = document.querySelectorAll('#eventiDT tbody tr');
                     for (const row of rows) {
-                        if (row.textContent.includes(nomeGara)) {
+                        const testoRiga = row.textContent;
+                        const testoPulito = testoRiga
+                            .toLowerCase()
+                            .replace(/["'“”«»]/g, '')
+                            .replace(/[\^°]/g, '')
+                            .replace(/\s+/g, ' ')
+                            .trim();
+                        if (testoPulito.includes(nomeCercatoPulito)) {
                             return { id: row.id, html: row.outerHTML };
                         }
                     }
                     return null;
-                }, iscrizione.gare.nome);
+                }, nomeCercatoPulito);
 
                 if (garaTrovataFallback) {
                     console.log(`✅ Gara trovata (fallback)! ID riga: ${garaTrovataFallback.id}`);
@@ -556,6 +624,12 @@ let navigazioneRiuscita = false;
 let tentativiEffettuati = 0;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    // ✅ FIX: Se abortito, esci subito
+    if (isAborted) {
+        console.log('🛑 Worker abortito, interrompo retry navigazione.');
+        break;
+    }
+    
     tentativiEffettuati++;
     try {
         console.log(`🔄 Tentativo navigazione ${tentativo}/${MAX_TENTATIVI}`);
@@ -1085,6 +1159,8 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
         return { success: true };
 
     } catch (error) {
+        isAborted = true; // ← AGGIUNGI QUESTA RIGA
+        
         console.error('❌ [ISCRIZIONE WORKER] Errore:', error);
 
         if (userId) {
@@ -1094,6 +1170,12 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
         }
 
         try {
+            // ✅ FIX: Crea la cartella logs se non esiste
+            const logsDir = path.join(process.cwd(), 'logs');
+            if (!fs.existsSync(logsDir)) {
+                fs.mkdirSync(logsDir, { recursive: true });
+            }
+            
             const screenshotPath = `logs/error_${idIscrizione}_${Date.now()}.png`;
             await page.screenshot({ path: screenshotPath });
             console.log(`🐛 [DEBUG] 📸 Screenshot errore salvato: ${screenshotPath}`);
