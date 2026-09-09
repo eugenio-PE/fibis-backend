@@ -49,6 +49,7 @@ async function sendWebSocketMessage(userId, type, payload) {
 // ============================================================
 export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null) {
     let isAborted = false; // ← AGGIUNGI QUESTA RIGA
+    let iscrizioneCompletata = false; // ← DEVE ESSERCI QUESTA RIGA!
     console.log(`🔄 [ISCRIZIONE WORKER] Avvio iscrizione ${idIscrizione}...`);
     const startTime = Date.now();
 
@@ -769,36 +770,68 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
             console.warn('⚠️ Errore durante verifica precompilazione:', error.message);
         }
 
-        // ============================================================
-        // 8. APRI LA SEZIONE E LEGGI I TURNI
-        // ============================================================
-        console.log('🐛 [DEBUG] Step 10: 🔍 Apro "Iscrizioni Gara" e leggo i turni...');
+// ============================================================
+// 8. APRI LA SEZIONE E LEGGI I TURNI (CON FALLBACK)
+// ============================================================
+console.log('🐛 [DEBUG] Step 10: 🔍 Apro "Iscrizioni Gara" e leggo i turni...');
 
-        try {
-            const sezioneAperta = await page.evaluate(() => {
-                const accordionI = document.querySelector('#accordion_I');
-                if (!accordionI) return false;
-                
-                const headers = accordionI.querySelectorAll('h3.ui-accordion-header');
-                for (const header of headers) {
-                    const text = header.textContent.trim();
-                    if (text.includes('Iscrizioni Gara')) {
-                        if (header.getAttribute('aria-expanded') !== 'true') {
-                            header.click();
-                        }
-                        return true;
-                    }
+let sezioneAperta = false;
+
+try {
+    // ✅ PRIMO TENTATIVO: cerca "Iscrizioni Gara" (ESATTO)
+    sezioneAperta = await page.evaluate(() => {
+        const accordionI = document.querySelector('#accordion_I');
+        if (!accordionI) return false;
+        
+        const headers = accordionI.querySelectorAll('h3.ui-accordion-header');
+        for (const header of headers) {
+            const text = header.textContent.trim();
+            if (text.includes('Iscrizioni Gara')) {
+                if (header.getAttribute('aria-expanded') !== 'true') {
+                    header.click();
                 }
-                return false;
-            });
-
-            if (!sezioneAperta) {
-                throw new Error('Impossibile trovare o aprire "Iscrizioni Gara"');
+                return true;
             }
-            console.log('✅ Sezione "Iscrizioni Gara" aperta!');
+        }
+        return false;
+    });
 
-            await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
-            console.log('✅ Select #turno_sel visibile');
+    if (sezioneAperta) {
+        console.log('✅ Sezione "Iscrizioni Gara" aperta!');
+    } else {
+        // ✅ FALLBACK: cerca "Iscrizioni" (generico)
+        console.log('⚠️ "Iscrizioni Gara" non trovato, provo fallback "Iscrizioni"...');
+        sezioneAperta = await page.evaluate(() => {
+            const accordionI = document.querySelector('#accordion_I');
+            if (!accordionI) return false;
+            
+            const headers = accordionI.querySelectorAll('h3.ui-accordion-header');
+            for (const header of headers) {
+                const text = header.textContent.trim();
+                if (text.includes('Iscrizioni')) {
+                    if (header.getAttribute('aria-expanded') !== 'true') {
+                        header.click();
+                    }
+                    return true;
+                }
+            }
+            return false;
+        });
+        
+        if (sezioneAperta) {
+            console.log('✅ Fallback "Iscrizioni" aperto!');
+        }
+    }
+
+    if (!sezioneAperta) {
+        throw new Error('Impossibile trovare o aprire "Iscrizioni Gara" o "Iscrizioni"');
+    }
+
+    // Attendi la select dei turni
+    await page.waitForSelector('select#turno_sel', { visible: true, timeout: 5000 });
+    console.log('✅ Select #turno_sel visibile');
+
+    // ... resto del codice (lettura giorni) ...
 
             console.log('🐛 [DEBUG] Leggo i giorni disponibili...');
             
