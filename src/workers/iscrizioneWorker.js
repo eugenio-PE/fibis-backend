@@ -50,7 +50,8 @@ async function sendWebSocketMessage(userId, type, payload) {
 export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null) {
     let isAborted = false;
     let iscrizioneCompletata = false;
-    let workerAbortito = false; // ← AGGIUNGI QUESTA RIGA
+    let workerAbortito = false;
+    let faseAttuale = 'INIZIO'; // ← AGGIUNGI!
     console.log(`🔄 [ISCRIZIONE WORKER] Avvio iscrizione ${idIscrizione}...`);
     const startTime = Date.now();
 
@@ -306,11 +307,12 @@ console.log('✅ GS pronto, continuo con STECCA...');
 console.log('🐛 [DEBUG] Step 5: 🔍 Selezione STECCA...');
 
 let steccaRiuscita = false;
+faseAttuale = 'SELEZIONE_STECCA'; // ← AGGIUNGI!
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
-    // ✅ CONTROLLO COMBINATO
-    if (iscrizioneCompletata || workerAbortito) {
-        console.log('🛑 Retry STECCA ignorato: iscrizione già completata o abortita.');
+    // ✅ CONTROLLO COMBINATO + FASE
+    if (faseAttuale !== 'SELEZIONE_STECCA' || iscrizioneCompletata || workerAbortito) {
+        console.log('🛑 Fase cambiata o iscrizione completata, interrompo retry STECCA.');
         steccaRiuscita = true;
         return;
     }
@@ -422,6 +424,8 @@ if (!steccaRiuscita) {
     }
     throw new Error(msg);
 }
+
+faseAttuale = 'LETTURA_TURNI'; // ← AGGIUNGI DOPO IL LOOP
         // ============================================================
         // 4. IMPOSTA FILTRI (DINAMICI)
         // ============================================================
@@ -1003,9 +1007,9 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
 
                     if (checkError) {
                         console.log(`⚠️ [POLLING ESUBERO #${pollCountEsubero}] Errore controllo DB:`, checkError.message);
-                    } else if (checkData.giorno_iscrizione === 'Esubero') {
-                        esuberoScelto = checkData.giorno_iscrizione;
-                        console.log(`✅ [POLLING ESUBERO #${pollCountEsubero}] ESUBERO SCELTO!`);
+                    } else if (checkData.giorno_iscrizione === 'Esubero' || checkData.stato === 'in_esubero') {
+                        esuberoScelto = checkData.giorno_iscrizione || 'Esubero';
+                        console.log(`✅ [POLLING ESUBERO #${pollCountEsubero}] ESUBERO SCELTO! (stato: ${checkData.stato})`);
                         break;
                     } else if (checkData.stato === 'annullata') {
                         console.log(`❌ [POLLING ESUBERO #${pollCountEsubero}] Iscrizione annullata dall'utente`);
@@ -1018,6 +1022,24 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                 if (!esuberoScelto) {
                     console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
                     throw new Error('Tempo scaduto per la scelta dell\'esubero');
+                }
+
+                // ✅ FIX: Clicca sul pulsante Esubero nel portale
+                if (esuberoScelto) {
+                    console.log('🔄 [WORKER] Clicco su Esubero nel portale...');
+                    try {
+                        await page.evaluate(() => {
+                            // Cerca il pulsante Esubero
+                            const btn = Array.from(document.querySelectorAll('button, a, input'))
+                                .find(el => el.textContent?.toLowerCase().includes('esubero'));
+                            if (btn) btn.click();
+                            return !!btn;
+                        });
+                        console.log('✅ Click Esubero eseguito');
+                        await new Promise(r => setTimeout(r, 1000));
+                    } catch (e) {
+                        console.log('⚠️ Errore click Esubero:', e.message);
+                    }
                 }
                 
             } else {

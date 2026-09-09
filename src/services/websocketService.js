@@ -87,60 +87,72 @@ async function handleWebSocketMessage(ws, userId, data) {
             break;
         }
 
-        case 'ISCRIZIONE_GIORNO_SCELTO': {
-            // L'utente ha scelto un giorno
-            console.log(`📨 [WS] === RICEVUTO ISCRIZIONE_GIORNO_SCELTO ===`);
-            console.log(`📨 [WS] Payload ricevuto:`, JSON.stringify(data.payload, null, 2));
-            
-            const { iscrizioneId, giornoScelto } = data.payload;
-            console.log(`📨 [WS] iscrizioneId: ${iscrizioneId} (tipo: ${typeof iscrizioneId})`);
-            console.log(`📨 [WS] giornoScelto: "${giornoScelto}" (tipo: ${typeof giornoScelto})`);
-            
-            // ✅ VALIDAZIONE: controlla se i dati sono validi
-            if (!iscrizioneId) {
-                console.log(`❌ [WS] ERRORE: iscrizioneId mancante!`);
-                break;
-            }
-            if (!giornoScelto) {
-                console.log(`❌ [WS] ERRORE: giornoScelto mancante!`);
-                break;
-            }
-            
-            // ✅ CONVERTI LA DATA IN FORMATO ISO (YYYY-MM-DD)
-            // Da "25/09/2026" a "2026-09-25"
-            const dateParts = giornoScelto.split('/'); // ["25", "09", "2026"]
-            const giornoISO = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`; // "2026-09-25"
-            console.log(`🔄 [WS] Data convertita: "${giornoScelto}" → "${giornoISO}"`);
-            
-            console.log(`🔍 [WS] Tentativo di aggiornare iscrizione ${iscrizioneId} con giorno: "${giornoISO}"...`);
-            
-            try {
-                // ✅ AGGIUNTO .select() PER VEDERE IL RISULTATO
-                const { data: updateData, error: updateError } = await supabaseAdmin
-                    .from('iscrizioni_gare')
-                    .update({ 
-                        giorno_iscrizione: giornoISO,  // ✅ USA IL FORMATO ISO!
-                        stato: 'in_attesa_completamento'
-                    })
-                    .eq('id', iscrizioneId)
-                    .select(); // ← IMPORTANTE! Per vedere cosa è stato aggiornato
-                
-                if (updateError) {
-                    console.log(`❌ [WS] ERRORE UPDATE:`, updateError);
-                    console.log(`❌ [WS] Dettaglio errore:`, JSON.stringify(updateError, null, 2));
-                } else {
-                    console.log(`✅ [WS] UPDATE RIUSCITO!`);
-                    console.log(`📊 [WS] Dati aggiornati:`, JSON.stringify(updateData, null, 2));
-                    console.log(`📨 [WS] ✅ Giorno "${giornoISO}" salvato per iscrizione ${iscrizioneId}`);
-                }
-            } catch (error) {
-                console.log(`❌ [WS] ECCEZIONE DURANTE UPDATE:`, error);
-                console.log(`❌ [WS] Stack:`, error.stack);
-            }
-            
-            console.log(`📨 [WS] === FINE ISCRIZIONE_GIORNO_SCELTO ===`);
-            break;
+case 'ISCRIZIONE_GIORNO_SCELTO': {
+    // L'utente ha scelto un giorno
+    console.log(`📨 [WS] === RICEVUTO ISCRIZIONE_GIORNO_SCELTO ===`);
+    console.log(`📨 [WS] Payload ricevuto:`, JSON.stringify(data.payload, null, 2));
+    
+    const { iscrizioneId, giornoScelto } = data.payload;
+    console.log(`📨 [WS] iscrizioneId: ${iscrizioneId} (tipo: ${typeof iscrizioneId})`);
+    console.log(`📨 [WS] giornoScelto: "${giornoScelto}" (tipo: ${typeof giornoScelto})`);
+    
+    if (!iscrizioneId) {
+        console.log(`❌ [WS] ERRORE: iscrizioneId mancante!`);
+        break;
+    }
+    if (!giornoScelto) {
+        console.log(`❌ [WS] ERRORE: giornoScelto mancante!`);
+        break;
+    }
+    
+    // ✅ FIX: Gestione Esubero
+    let giornoISO = null;
+    let nuovoStato = 'in_attesa_completamento';
+    
+    if (giornoScelto === 'Esubero') {
+        // ✅ Esubero: non convertire come data!
+        giornoISO = null; // PostgreSQL accetta NULL
+        nuovoStato = 'in_esubero';
+        console.log(`🔄 [WS] Esubero scelto, stato: ${nuovoStato}`);
+    } else if (giornoScelto && giornoScelto.includes('/')) {
+        // ✅ Data normale: "25/09/2026" → "2026-09-25"
+        const [dd, mm, yyyy] = giornoScelto.split('/');
+        giornoISO = `${yyyy}-${mm}-${dd}`;
+        console.log(`🔄 [WS] Data convertita: "${giornoScelto}" → "${giornoISO}"`);
+    } else {
+        // ✅ Fallback: usa il valore come stringa
+        giornoISO = giornoScelto;
+        console.log(`🔄 [WS] Data senza conversione: "${giornoISO}"`);
+    }
+    
+    console.log(`🔍 [WS] Tentativo di aggiornare iscrizione ${iscrizioneId} con giorno: "${giornoISO}", stato: "${nuovoStato}"...`);
+    
+    try {
+        const { data: updateData, error: updateError } = await supabaseAdmin
+            .from('iscrizioni_gare')
+            .update({ 
+                giorno_iscrizione: giornoISO,
+                stato: nuovoStato
+            })
+            .eq('id', iscrizioneId)
+            .select();
+        
+        if (updateError) {
+            console.log(`❌ [WS] ERRORE UPDATE:`, updateError);
+            console.log(`❌ [WS] Dettaglio errore:`, JSON.stringify(updateError, null, 2));
+        } else {
+            console.log(`✅ [WS] UPDATE RIUSCITO!`);
+            console.log(`📊 [WS] Dati aggiornati:`, JSON.stringify(updateData, null, 2));
+            console.log(`📨 [WS] ✅ Giorno "${giornoISO || 'Esubero'}" salvato per iscrizione ${iscrizioneId}`);
         }
+    } catch (error) {
+        console.log(`❌ [WS] ECCEZIONE DURANTE UPDATE:`, error);
+        console.log(`❌ [WS] Stack:`, error.stack);
+    }
+    
+    console.log(`📨 [WS] === FINE ISCRIZIONE_GIORNO_SCELTO ===`);
+    break;
+}
 
         default:
             console.log(`⚠️ [WS] Tipo messaggio sconosciuto: ${data.type}`);
