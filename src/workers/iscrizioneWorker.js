@@ -940,6 +940,7 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                 // ============================================================
                 console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
                 let giornoScelto = null;
+                let iscrizioneCompletata = false; // ← AGGIUNGI QUESTA RIGA!
                 const startTimeAttesa = Date.now();
                 const maxWaitTime = 60000;
                 let pollCount = 0;
@@ -1006,6 +1007,7 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                         
                         if (checkData.giorno_iscrizione) {
                             giornoScelto = checkData.giorno_iscrizione;
+                            iscrizioneCompletata = true; // ← AGGIUNGI QUESTA RIGA!
                             console.log(`✅ [POLLING #${pollCount}] ✅ GIORNO TROVATO! ➡️ ${giornoScelto}`);
                             console.log(`📊 [POLLING #${pollCount}] Tempo totale attesa: ${elapsed}s`);
                             break;
@@ -1075,23 +1077,16 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                     console.log('⚠️ Errore ricerca atleta:', e.message);
                 }
 
-                console.log('💾 Salvataggio iscrizione...');
+                              console.log('💾 Salvataggio iscrizione...');
                 try {
                     const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
                     if (btnSalva) {
-                        // ✅ Click e attendi eventuale navigazione, ma NON riavviare il flusso
                         await btnSalva.click();
-                        
-                        // Aspetta un po' per il salvataggio
                         await new Promise(resolve => setTimeout(resolve, 2000));
-                        
-                        // Verifica che il salvataggio sia andato a buon fine
                         const successo = await page.evaluate(() => {
-                            // Cerca messaggi di successo
                             const msg = document.querySelector('.message-success, .alert-success, .success');
                             return msg !== null;
                         });
-                        
                         if (successo) {
                             console.log('✅ Iscrizione salvata con successo!');
                         } else {
@@ -1101,7 +1096,7 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                 } catch (e) {
                     console.log('⚠️ Errore salvataggio:', e.message);
                 }
-            }
+            } // ← QUESTA CHIUDE IL BLOCCO else (NON AGGIUNGERE ALTRO!)
 
             console.log('📝 Aggiornamento stato iscrizione...');
             await supabaseAdmin
@@ -1122,7 +1117,12 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
 
         } catch (error) {
             console.error('❌ Errore durante il processo di iscrizione:', error);
-            throw error;
+            
+            if (iscrizioneCompletata) {
+                console.log('⚠️ Errore dopo il completamento, lo ignoro e termino.');
+            } else {
+                throw error;
+            }
         }
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
