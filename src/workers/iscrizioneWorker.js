@@ -123,37 +123,29 @@ export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
 // ============================================================
-// 1. LOGIN (VELOCE)
+// 1. LOGIN (VELOCE E DETERMINISTICO)
 // ============================================================
 console.log('🐛 [DEBUG] Step 1-3: 🔐 Login...');
 
 let loginRiuscito = false;
-let loginCompletato = false; // ✅ FLAG PER CHIUDERE DEFINITIVAMENTE IL LOOP
 
-for (let tentativo = 1; tentativo <= MAX_TENTATIVI && !loginCompletato; tentativo++) {
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     try {
         console.log(`🔄 Tentativo login ${tentativo}/${MAX_TENTATIVI}`);
         
-        // Vai alla pagina di login
         await page.goto(PORTALE_URL, {
             waitUntil: 'domcontentloaded',
             timeout: 10000
         });
-        console.log(`🐛 [DEBUG] ✅ URL caricato: ${page.url()}`);
 
-        // Aspetta che il form sia pronto (max 3 secondi)
-        await page.waitForSelector('#edit-name', { timeout: 3000, visible: true });
+        await page.waitForSelector('#edit-name', { timeout: 4000, visible: true });
         
-        // Inserisci credenziali
-        await page.type('#edit-name', credenziali.username, { delay: 50 });
-        await page.type('#edit-pass', credenziali.password, { delay: 50 });
+        await page.type('#edit-name', credenziali.username, { delay: 30 });
+        await page.type('#edit-pass', credenziali.password, { delay: 30 });
         
-        // Click login e attendi navigazione
+        // ✅ FIX: ATOMICO - click + attesa navigazione insieme
         await Promise.all([
-            page.waitForNavigation({ 
-                waitUntil: 'domcontentloaded',
-                timeout: 15000 
-            }),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
             page.click('#edit-submit-1')
         ]);
         
@@ -162,23 +154,17 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI && !loginCompletato; tentativ
             loginRiuscito = true;
             console.log(`✅ Login riuscito al tentativo ${tentativo}`);
             
-            // Aspetta che la bacheca sia realmente pronta (elementi chiave)
             try {
-                await page.waitForSelector('a.expandfirst, .menu, #menu', { 
-                    timeout: 5000,
-                    visible: true 
-                });
+                await page.waitForSelector('a.expandfirst, .menu, #menu', { timeout: 4000, visible: true });
                 console.log('✅ Bacheca caricata e pronta');
             } catch (e) {
-                console.log('⚠️ Bacheca caricata ma alcuni elementi non trovati, continuo...');
+                console.log('⚠️ Bacheca caricata ma elementi secondari non ancora visibili, continuo...');
             }
-            
-            loginCompletato = true; // ✅ CHIUDE DEFINITIVAMENTE IL LOOP
             break;
         }
     } catch (error) {
         ultimoErrore = error.message;
-        console.log(`⚠️ Tentativo login ${tentativo} fallito:`, error.message);
+        console.log(`⚠️ Tentativo login ${tentativo} fallito: ${ultimoErrore}`);
         if (tentativo < MAX_TENTATIVI) {
             await new Promise(r => setTimeout(r, 1500 * tentativo));
         }
@@ -193,74 +179,55 @@ if (!loginRiuscito) {
     }
     throw new Error(msg);
 }
-
 // ============================================================
-// 2. GESTIONALE SPORTIVO (DEFINITIVO - CON SELLETTORE ESATTO)
+// 2. GESTIONALE SPORTIVO (ATOMIC CLICK & NAVIGATION)
 // ============================================================
 console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo...');
 
 let gestionaleRiuscito = false;
 let ultimoErroreGS = null;
-let gsCompletato = false; // ✅ FLAG PER CHIUDERE DEFINITIVAMENTE IL LOOP
 
-for (let tentativo = 1; tentativo <= MAX_TENTATIVI && !gsCompletato; tentativo++) {
+for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     try {
         console.log(`🔄 Tentativo GS ${tentativo}/${MAX_TENTATIVI}`);
 
-        // 1. Aspetta che la bacheca sia completamente caricata
-        console.log('⏳ Attesa caricamento bacheca...');
-        await page.waitForFunction(() => {
-            return document.readyState === 'complete';
-        }, { timeout: 10000 });
-
-        // 2. Aspetta che il link GS sia presente nel DOM
-        console.log('⏳ Attesa link "Gestionale sportivo"...');
-        await page.waitForSelector('a.expandfirst[href*="GS"]', {
-            timeout: 10000,
-            visible: true
-        });
-
-        // 3. Clicca il link (con scroll per sicurezza)
-        await page.evaluate(() => {
-            const link = document.querySelector('a.expandfirst[href*="GS"]');
-            if (link) {
-                link.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                link.click();
-                return true;
-            }
-            return false;
-        });
-
-        console.log('✅ Click su "Gestionale sportivo" eseguito');
-
-        // 4. Attendi la navigazione verso GS
-        await page.waitForNavigation({
-            waitUntil: 'domcontentloaded',
-            timeout: 15000
-        });
-
-        // 5. VERIFICA: siamo su GS?
-        const urlCorrente = page.url();
-        if (urlCorrente.includes('/GS') || urlCorrente.includes('GS')) {
+        // Se siamo già su GS, salta la navigazione
+        if (page.url().includes('GS')) {
+            console.log('✅ Pagina già su GS!');
             gestionaleRiuscito = true;
-            console.log(`✅ Gestionale sportivo aperto (tentativo ${tentativo})`);
-            console.log(`📐 URL: ${urlCorrente}`);
+            break;
+        }
 
-            // 6. Aspetta che gli elementi di GS siano pronti
-            console.log('⏳ Attesa elementi GS...');
+        // Assicurati che il link sia visibile e pronto
+        await page.waitForSelector('a.expandfirst[href*="GS"]', { timeout: 8000, visible: true });
+
+        // ✅ FIX: ATOMICO - click + attesa navigazione insieme
+        await Promise.all([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
+            page.evaluate(() => {
+                const link = document.querySelector('a.expandfirst[href*="GS"]');
+                if (link) {
+                    link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    link.click();
+                } else {
+                    throw new Error('Link GS non trovato nel DOM');
+                }
+            })
+        ]);
+
+        // Verifica URL di destinazione
+        const urlCorrente = page.url();
+        if (urlCorrente.includes('GS')) {
+            gestionaleRiuscito = true;
+            console.log(`✅ Gestionale sportivo aperto con successo (tentativo ${tentativo})`);
+
             try {
-                await page.waitForSelector('button.dtUP_sett, select[name="stagione_f"]', {
-                    timeout: 10000,
-                    visible: true
-                });
-                console.log('✅ Elementi GS caricati');
+                await page.waitForSelector('button.dtUP_sett, select[name="stagione_f"]', { timeout: 5000, visible: true });
+                console.log('✅ Elementi GS pronti');
             } catch (e) {
-                console.log('⚠️ Elementi GS non trovati, ma continuo...');
+                console.log('⚠️ Elementi GS non ancora visibili, proseguo comunque...');
             }
 
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            gsCompletato = true; // ✅ CHIUDE DEFINITIVAMENTE IL LOOP
             break;
         }
 
@@ -269,27 +236,21 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI && !gsCompletato; tentativo++
         console.log(`⚠️ Tentativo GS ${tentativo} fallito: ${ultimoErroreGS}`);
 
         if (tentativo < MAX_TENTATIVI) {
-            console.log(`⏳ Riprovo tra ${tentativo * 2} secondi...`);
+            console.log(`⏳ Attesa ${tentativo * 2}s prima del ripristino bacheca...`);
             await new Promise(r => setTimeout(r, 2000 * tentativo));
+            
             try {
-                // Torna alla bacheca e ricarica
-                await page.goto(PORTALE_URL + '/bacheca', {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 10000
-                });
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await page.goto(`${PORTALE_URL}/bacheca`, { waitUntil: 'domcontentloaded', timeout: 8000 });
             } catch (e) {
-                console.log('⚠️ Errore reload bacheca:', e.message);
+                console.log('⚠️ Errore nel ricaricamento della bacheca:', e.message);
             }
         }
     }
 }
 
-// 7. VERIFICA FINALE: siamo su GS?
 if (!gestionaleRiuscito) {
-    const urlCorrente = page.url();
-    if (urlCorrente.includes('/GS') || urlCorrente.includes('GS')) {
-        console.log('✅ La pagina è già su GS! Continuo...');
+    if (page.url().includes('GS')) {
+        console.log('✅ Verificato: la pagina si trova comunque su GS! Continuo...');
         gestionaleRiuscito = true;
     } else {
         const msg = `Impossibile aprire GS dopo ${MAX_TENTATIVI} tentativi: ${ultimoErroreGS || 'errore sconosciuto'}`;
@@ -587,7 +548,7 @@ let nomeGara = iscrizione.gare.nome; // ← SALVA il nome per il retry
         }
 
 // ============================================================
-// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (RETRY SEMPLICE CON MONITORAGGIO)
+// 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (ATOMIC CLICK & NAVIGATION)
 // ============================================================
 console.log('🐛 [DEBUG] Step 9: 🔗 Navigazione alla pagina iscrizioni...');
 
@@ -603,14 +564,12 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         if (tentativo === 1) {
             console.log('📌 Primo tentativo: scroll e apertura menu...');
             
-            // Scroll alla riga
             await page.evaluate((rowId) => {
                 const row = document.querySelector(`#${rowId}`);
                 if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, garaTrovata.id);
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            // Apri il menu contestuale
             const menuAperto = await page.evaluate((rowId) => {
                 const triggerEl = document.querySelector(`#${rowId} .cm-FULL_3`);
                 if (!triggerEl) return false;
@@ -631,31 +590,28 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
             console.log('✅ Menu contestuale aperto');
             await new Promise(resolve => setTimeout(resolve, 500));
         } else {
-            // Tentativi successivi: log di monitoraggio
             console.log(`📌 Tentativo ${tentativo}: riprovo il click su "Iscrizioni" (senza reload)`);
         }
 
-        // Clicca su "Iscrizioni"
-        const navigato = await page.evaluate((rowId) => {
-            const items = Array.from(document.querySelectorAll('.context-menu-item'));
-            const targetItem = items.find(item => 
-                item.textContent.trim().toLowerCase().includes('iscrizioni')
-            );
-            if (!targetItem) return false;
-            
-            const root = $(targetItem).data('contextMenuRoot');
-            const key = $(targetItem).data('contextMenuKey');
-            const $triggerRow = $(`#${rowId}`);
-            if (!$triggerRow.length) return false;
-            if (!root || !root.callback) return false;
-            root.callback.call($triggerRow, key, root);
-            return true;
-        }, garaTrovata.id);
-
-        if (!navigato) throw new Error('Impossibile cliccare su Iscrizioni');
-
-        // Attendi la navigazione
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA });
+        // ✅ FIX: ATOMICO - click "Iscrizioni" + attesa navigazione insieme
+        await Promise.all([
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: TIMEOUT_ATTESA }),
+            page.evaluate((rowId) => {
+                const items = Array.from(document.querySelectorAll('.context-menu-item'));
+                const targetItem = items.find(item => 
+                    item.textContent.trim().toLowerCase().includes('iscrizioni')
+                );
+                if (!targetItem) return false;
+                
+                const root = $(targetItem).data('contextMenuRoot');
+                const key = $(targetItem).data('contextMenuKey');
+                const $triggerRow = $(`#${rowId}`);
+                if (!$triggerRow.length) return false;
+                if (!root || !root.callback) return false;
+                root.callback.call($triggerRow, key, root);
+                return true;
+            }, garaTrovata.id)
+        ]);
         
         // Verifica URL
         const urlCorrente = page.url();
@@ -679,7 +635,6 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         if (tentativo < MAX_TENTATIVI) {
             console.log(`⏳ Attesa 2 secondi prima del tentativo ${tentativo + 1}...`);
             await new Promise(r => setTimeout(r, 2000));
-            // Se fallisce, NON faccio nulla di speciale, riprovo il click
         } else {
             console.log(`❌ [MONITOR] Tutti i ${MAX_TENTATIVI} tentativi falliti!`);
         }
@@ -698,7 +653,6 @@ if (!navigazioneRiuscita) {
 
 console.log('✅ Step 7 completato!');
 console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentativo/i, riuscita: ${navigazioneRiuscita}`);
-
         // ============================================================
         // 7.5 VERIFICA PRECOMPILAZIONE
         // ============================================================
