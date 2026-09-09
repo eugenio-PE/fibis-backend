@@ -852,14 +852,15 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                 }
             }
 
-            await supabaseAdmin
-                .from('iscrizioni_gare')
-                .update({
-                    giorni_disponibili: JSON.stringify(giorniDisponibili),
-                    stato: isTuttiPieni ? 'in_attesa_esubero' : 'in_attesa_giorni'
-                })
-                .eq('id', idIscrizione);
-            console.log('✅ Giorni salvati nel database');
+await supabaseAdmin
+    .from('iscrizioni_gare')
+    .update({
+        giorno_iscrizione: null,  // ← AGGIUNGI QUESTA RIGA!
+        giorni_disponibili: JSON.stringify(giorniDisponibili),
+        stato: isTuttiPieni ? 'in_attesa_esubero' : 'in_attesa_giorni'
+    })
+    .eq('id', idIscrizione);
+console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
 
             if (userId) {
                 console.log(`📤 Invio giorni via WebSocket all'utente: ${userId}`);
