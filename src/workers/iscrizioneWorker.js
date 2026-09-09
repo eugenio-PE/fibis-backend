@@ -215,6 +215,12 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         break;
     }
     
+    // ✅ FIX: Se l'iscrizione è già completata, ferma tutto!
+    if (gestionaleRiuscito || iscrizioneCompletata) {
+        console.log('🛑 Iscrizione completata o GS già aperto, interrompo retry.');
+        break;
+    }
+    
     try {
         console.log(`🔄 Tentativo GS ${tentativo}/${MAX_TENTATIVI}`);
 
@@ -262,14 +268,17 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         ultimoErroreGS = error.message;
         console.log(`⚠️ Tentativo GS ${tentativo} fallito: ${ultimoErroreGS}`);
 
-        if (tentativo < MAX_TENTATIVI) {
+        // ✅ FIX: Recovery SOLO se non siamo già andati avanti
+        if (tentativo < MAX_TENTATIVI && !gestionaleRiuscito && !iscrizioneCompletata) {
             console.log(`⏳ Attesa ${tentativo * 2}s prima del ripristino bacheca...`);
             await new Promise(r => setTimeout(r, 2000 * tentativo));
             
-            try {
-                await page.goto(`${PORTALE_URL}/bacheca`, { waitUntil: 'domcontentloaded', timeout: 8000 });
-            } catch (e) {
-                console.log('⚠️ Errore nel ricaricamento della bacheca:', e.message);
+            if (!gestionaleRiuscito && !iscrizioneCompletata) {
+                try {
+                    await page.goto(`${PORTALE_URL}/bacheca`, { waitUntil: 'domcontentloaded', timeout: 8000 });
+                } catch (e) {
+                    console.log('⚠️ Errore ripristino bacheca:', e.message);
+                }
             }
         }
     }
@@ -1094,8 +1103,20 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                 }
 
                 console.log(`📅 Seleziono il giorno: ${giornoScelto}`);
+
+                // ✅ FIX: Converti data ISO in formato italiano per il confronto
+                let giornoFormattato = giornoScelto;
+                if (giornoScelto && giornoScelto.includes('-')) {
+                    const [yyyy, mm, dd] = giornoScelto.split('-');
+                    giornoFormattato = `${dd}/${mm}/${yyyy}`;
+                }
+
+                console.log(`📌 Data formattata per confronto: ${giornoFormattato}`);
+
                 const giornoSelezionato = giorniDisponibili.find(g => 
-                    g.data === giornoScelto || g.value === giornoScelto
+                    g.data === giornoScelto ||      // ISO (fallback)
+                    g.data === giornoFormattato ||  // Italiano (DD/MM/YYYY)
+                    g.value === giornoScelto        // Value diretto
                 );
 
                 if (giornoSelezionato) {
@@ -1159,6 +1180,9 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                     console.log('⚠️ Errore salvataggio:', e.message);
                 }
             } // ← QUESTA CHIUDE IL BLOCCO else (NON AGGIUNGERE ALTRO!)
+
+            // ✅ FIX: Imposta il flag PRIMA di qualsiasi operazione
+            iscrizioneCompletata = true;
 
             console.log('📝 Aggiornamento stato iscrizione...');
             await supabaseAdmin
