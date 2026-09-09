@@ -209,6 +209,7 @@ console.log('🐛 [DEBUG] Step 4: 🔗 Navigazione al gestionale sportivo...');
 
 let gestionaleRiuscito = false;
 let ultimoErroreGS = null;
+faseAttuale = 'NAVIGAZIONE_GS'; // ← AGGIUNGI!
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     // ✅ FIX: Se abortito, esci subito
@@ -270,7 +271,13 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
         ultimoErroreGS = error.message;
         console.log(`⚠️ Tentativo GS ${tentativo} fallito: ${ultimoErroreGS}`);
 
-        // ✅ FIX: Recovery SOLO se non siamo già andati avanti
+        // ✅ FIX: Se l'iscrizione è già andata avanti o completata, ferma tutto!
+        if (iscrizioneCompletata || faseAttuale !== 'NAVIGAZIONE_GS') {
+            console.log('🛑 Annullato retry GS: l\'iscrizione è già avanzata o completata.');
+            gestionaleRiuscito = true;
+            break;
+        }
+
         if (tentativo < MAX_TENTATIVI && !gestionaleRiuscito && !iscrizioneCompletata) {
             console.log(`⏳ Attesa ${tentativo * 2}s prima del ripristino bacheca...`);
             await new Promise(r => setTimeout(r, 2000 * tentativo));
@@ -301,6 +308,7 @@ if (!gestionaleRiuscito) {
 }
 
 console.log('✅ GS pronto, continuo con STECCA...');
+faseAttuale = 'SELEZIONE_STECCA'; // ← AGGIUNGI!
 // ============================================================
 // 3. SELEZIONE STECCA (VERIFICA CLASSE CORRETTA + CONTROLLO URL) 🚀
 // ============================================================
