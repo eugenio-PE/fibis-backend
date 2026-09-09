@@ -851,14 +851,64 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                 console.log('✅ Giorni inviati via WebSocket');
             }
 
-            if (isTuttiPieni) {
+                      if (isTuttiPieni) {
+                // ============================================================
+                // POLLING ESUBERO CON HEARTBEAT (VERSIONE OTTIMIZZATA)
+                // ============================================================
                 console.log('⏳ In attesa della scelta esubero dell\'utente (max 60 secondi)...');
                 
                 let esuberoScelto = null;
                 const startTimeAttesaEsubero = Date.now();
                 const maxWaitTimeEsubero = 60000;
+                let pollCountEsubero = 0;
+                let heartbeatCountEsubero = 0;
 
                 while (Date.now() - startTimeAttesaEsubero < maxWaitTimeEsubero) {
+                    pollCountEsubero++;
+                    const elapsed = ((Date.now() - startTimeAttesaEsubero) / 1000).toFixed(1);
+
+                    try {
+                        // 1. VERIFICA URL (ogni iterazione)
+                        const urlCorrente = page.url();
+                        if (!urlCorrente.includes('GS_accreditiEvento') && !urlCorrente.includes('accrediti')) {
+                            console.log(`❌ [POLLING ESUBERO #${pollCountEsubero}] URL non valido: ${urlCorrente}`);
+                            throw new Error('Sessione scaduta - pagina reindirizzata');
+                        }
+
+                        // 2. HEARTBEAT (ogni 5 secondi)
+                        heartbeatCountEsubero++;
+                        if (heartbeatCountEsubero % 5 === 0) {
+                            console.log(`💓 [HEARTBEAT ESUBERO #${heartbeatCountEsubero/5}] Mantenimento sessione...`);
+                            
+                            // Controllo leggero: il select esiste ancora nel DOM?
+                            try {
+                                await page.waitForSelector('select#turno_sel', { 
+                                    timeout: 200
+                                });
+                            } catch (e) {
+                                console.log(`⚠️ [HEARTBEAT ESUBERO] Select non trovato, continuo...`);
+                            }
+                            
+                            // Scroll leggero per tenere attiva la sessione
+                            await page.evaluate(() => {
+                                window.scrollBy(0, 1);
+                            }).catch(() => {});
+                        }
+
+                    } catch (browserErr) {
+                        console.error(`❌ [POLLING ESUBERO #${pollCountEsubero}] Errore browser:`, browserErr.message);
+                        
+                        // Notifica via WebSocket
+                        if (userId) {
+                            await sendWebSocketMessage(userId, 'ERRORE', {
+                                message: 'La sessione sul portale è scaduta. Per favore riprova l\'iscrizione.'
+                            });
+                        }
+                        throw new Error(`Sessione persa durante il polling esubero: ${browserErr.message}`);
+                    }
+
+                    // 3. LETTURA DATABASE
+                    console.log(`🔍 [POLLING ESUBERO #${pollCountEsubero}] Tempo: ${elapsed}s - Lettura database...`);
                     const { data: checkData, error: checkError } = await supabaseAdmin
                         .from('iscrizioni_gare')
                         .select('giorno_iscrizione, stato')
@@ -866,13 +916,13 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                         .single();
 
                     if (checkError) {
-                        console.log('⚠️ Errore controllo DB:', checkError.message);
+                        console.log(`⚠️ [POLLING ESUBERO #${pollCountEsubero}] Errore controllo DB:`, checkError.message);
                     } else if (checkData.giorno_iscrizione === 'Esubero') {
                         esuberoScelto = checkData.giorno_iscrizione;
-                        console.log(`✅ Esubero scelto dall'utente!`);
+                        console.log(`✅ [POLLING ESUBERO #${pollCountEsubero}] ESUBERO SCELTO!`);
                         break;
                     } else if (checkData.stato === 'annullata') {
-                        console.log('❌ Iscrizione annullata dall\'utente');
+                        console.log(`❌ [POLLING ESUBERO #${pollCountEsubero}] Iscrizione annullata dall'utente`);
                         throw new Error('Iscrizione annullata dall\'utente');
                     }
 
@@ -883,51 +933,96 @@ console.log(`📊 [MONITOR] Riepilogo navigazione: ${tentativiEffettuati} tentat
                     console.log('⏰ Timeout: nessuna scelta esubero entro 60 secondi');
                     throw new Error('Tempo scaduto per la scelta dell\'esubero');
                 }
-} else {
-    console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
-    let giornoScelto = null;
-    const startTimeAttesa = Date.now();
-    const maxWaitTime = 60000;
-    let pollCount = 0;
-
-    while (Date.now() - startTimeAttesa < maxWaitTime) {
-        pollCount++;
-        const elapsed = ((Date.now() - startTimeAttesa) / 1000).toFixed(1);
-        
-        console.log(`🔍 [POLLING #${pollCount}] Tempo: ${elapsed}s - Lettura database...`);
-        
-        const { data: checkData, error: checkError } = await supabaseAdmin
-            .from('iscrizioni_gare')
-            .select('giorno_iscrizione, stato')
-            .eq('id', idIscrizione)
-            .single();
-
-        if (checkError) {
-            console.log(`⚠️ [POLLING #${pollCount}] Errore controllo DB:`, checkError.message);
-        } else {
-            console.log(`📊 [POLLING #${pollCount}] DATABASE LETTO:`);
-            console.log(`   - giorno_iscrizione: ${checkData?.giorno_iscrizione || 'null'}`);
-            console.log(`   - stato: ${checkData?.stato || 'null'}`);
-            
-            if (checkData.giorno_iscrizione) {
-                giornoScelto = checkData.giorno_iscrizione;
-                console.log(`✅ [POLLING #${pollCount}] ✅ GIORNO TROVATO! ➡️ ${giornoScelto}`);
-                console.log(`📊 [POLLING #${pollCount}] Tempo totale attesa: ${elapsed}s`);
-                break;
-            } else if (checkData.stato === 'annullata') {
-                console.log(`❌ [POLLING #${pollCount}] Iscrizione annullata dall'utente`);
-                throw new Error('Iscrizione annullata dall\'utente');
+                
             } else {
-                console.log(`⏳ [POLLING #${pollCount}] Giorno ancora null, attendo...`);
-            }
-        }
+                // ============================================================
+                // POLLING GIORNI NORMALI CON HEARTBEAT (VERSIONE OTTIMIZZATA)
+                // ============================================================
+                console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
+                let giornoScelto = null;
+                const startTimeAttesa = Date.now();
+                const maxWaitTime = 60000;
+                let pollCount = 0;
+                let heartbeatCount = 0;
 
-        console.log(`⏳ [POLLING #${pollCount}] Attesa 1 secondo prima del prossimo poll...`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    console.log(`📊 [POLLING] POLLING TERMINATO: ${pollCount} tentativi, tempo totale: ${((Date.now() - startTimeAttesa) / 1000).toFixed(1)}s`);
-    console.log(`📊 [POLLING] Giorno trovato: ${giornoScelto || 'NESSUN GIORNO TROVATO!'}`);
+                while (Date.now() - startTimeAttesa < maxWaitTime) {
+                    pollCount++;
+                    const elapsed = ((Date.now() - startTimeAttesa) / 1000).toFixed(1);
+
+                    try {
+                        // 1. VERIFICA URL (ogni iterazione)
+                        const urlCorrente = page.url();
+                        if (!urlCorrente.includes('GS_accreditiEvento') && !urlCorrente.includes('accrediti')) {
+                            console.log(`❌ [POLLING #${pollCount}] URL non valido: ${urlCorrente}`);
+                            throw new Error('Sessione scaduta - pagina reindirizzata');
+                        }
+
+                        // 2. HEARTBEAT (ogni 5 secondi)
+                        heartbeatCount++;
+                        if (heartbeatCount % 5 === 0) {
+                            console.log(`💓 [HEARTBEAT #${heartbeatCount/5}] Mantenimento sessione...`);
+                            
+                            // Controllo leggero: il select esiste ancora nel DOM?
+                            try {
+                                await page.waitForSelector('select#turno_sel', { 
+                                    timeout: 200
+                                });
+                            } catch (e) {
+                                console.log(`⚠️ [HEARTBEAT] Select non trovato, continuo...`);
+                            }
+                            
+                            // Scroll leggero per tenere attiva la sessione
+                            await page.evaluate(() => {
+                                window.scrollBy(0, 1);
+                            }).catch(() => {});
+                        }
+
+                    } catch (browserErr) {
+                        console.error(`❌ [POLLING #${pollCount}] Errore browser:`, browserErr.message);
+                        
+                        // Notifica via WebSocket
+                        if (userId) {
+                            await sendWebSocketMessage(userId, 'ERRORE', {
+                                message: 'La sessione sul portale è scaduta. Per favore riprova l\'iscrizione.'
+                            });
+                        }
+                        throw new Error(`Sessione persa durante il polling: ${browserErr.message}`);
+                    }
+
+                    // 3. LETTURA DATABASE
+                    console.log(`🔍 [POLLING #${pollCount}] Tempo: ${elapsed}s - Lettura database...`);
+                    const { data: checkData, error: checkError } = await supabaseAdmin
+                        .from('iscrizioni_gare')
+                        .select('giorno_iscrizione, stato')
+                        .eq('id', idIscrizione)
+                        .single();
+
+                    if (checkError) {
+                        console.log(`⚠️ [POLLING #${pollCount}] Errore controllo DB:`, checkError.message);
+                    } else {
+                        console.log(`📊 [POLLING #${pollCount}] DATABASE LETTO:`);
+                        console.log(`   - giorno_iscrizione: ${checkData?.giorno_iscrizione || 'null'}`);
+                        console.log(`   - stato: ${checkData?.stato || 'null'}`);
+                        
+                        if (checkData.giorno_iscrizione) {
+                            giornoScelto = checkData.giorno_iscrizione;
+                            console.log(`✅ [POLLING #${pollCount}] ✅ GIORNO TROVATO! ➡️ ${giornoScelto}`);
+                            console.log(`📊 [POLLING #${pollCount}] Tempo totale attesa: ${elapsed}s`);
+                            break;
+                        } else if (checkData.stato === 'annullata') {
+                            console.log(`❌ [POLLING #${pollCount}] Iscrizione annullata dall'utente`);
+                            throw new Error('Iscrizione annullata dall\'utente');
+                        } else {
+                            console.log(`⏳ [POLLING #${pollCount}] Giorno ancora null, attendo...`);
+                        }
+                    }
+
+                    console.log(`⏳ [POLLING #${pollCount}] Attesa 1 secondo prima del prossimo poll...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+                
+                console.log(`📊 [POLLING] POLLING TERMINATO: ${pollCount} tentativi, tempo totale: ${((Date.now() - startTimeAttesa) / 1000).toFixed(1)}s`);
+                console.log(`📊 [POLLING] Giorno trovato: ${giornoScelto || 'NESSUN GIORNO TROVATO!'}`);
 
                 if (!giornoScelto) {
                     console.log('⏰ Timeout: nessun giorno selezionato entro 60 secondi');

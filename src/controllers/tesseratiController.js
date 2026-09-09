@@ -766,3 +766,25 @@ if (email) {
     res.status(500).json({ error: error.message });
   }
 };
+// ============================================================
+// DELETE /api/tesserati/:id/stecca/:steccaId
+// Elimina una stecca
+// ============================================================
+export const deleteStecca = async (req, res) => {
+  try {
+    const { id, steccaId } = req.params;
+
+    const { error } = await supabaseAdmin
+      .from('stecche_tesserati')
+      .delete()
+      .eq('id', steccaId)
+      .eq('id_tesserato', id);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'Stecca eliminata con successo' });
+  } catch (error) {
+    console.error('❌ Errore deleteStecca:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
