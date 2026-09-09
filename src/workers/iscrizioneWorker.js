@@ -48,8 +48,9 @@ async function sendWebSocketMessage(userId, type, payload) {
 // FUNZIONE PRINCIPALE
 // ============================================================
 export async function eseguiIscrizioneGara(idIscrizione, userIdFromClient = null) {
-    let isAborted = false; // ← AGGIUNGI QUESTA RIGA
-    let iscrizioneCompletata = false; // ← DEVE ESSERCI QUESTA RIGA!
+    let isAborted = false;
+    let iscrizioneCompletata = false;
+    let workerAbortito = false; // ← AGGIUNGI QUESTA RIGA
     console.log(`🔄 [ISCRIZIONE WORKER] Avvio iscrizione ${idIscrizione}...`);
     const startTime = Date.now();
 
@@ -307,6 +308,13 @@ console.log('🐛 [DEBUG] Step 5: 🔍 Selezione STECCA...');
 let steccaRiuscita = false;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    // ✅ CONTROLLO COMBINATO
+    if (iscrizioneCompletata || workerAbortito) {
+        console.log('🛑 Retry STECCA ignorato: iscrizione già completata o abortita.');
+        steccaRiuscita = true;
+        return;
+    }
+    
     // ✅ FIX: Se abortito, esci subito
     if (isAborted) {
         console.log('🛑 Worker abortito, interrompo retry STECCA.');
@@ -634,6 +642,13 @@ let navigazioneRiuscita = false;
 let tentativiEffettuati = 0;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
+    // ✅ CONTROLLO COMBINATO
+    if (iscrizioneCompletata || workerAbortito) {
+        console.log('🛑 Retry navigazione ignorato: iscrizione già completata o abortita.');
+        navigazioneRiuscita = true;
+        return;
+    }
+    
     // ✅ FIX: Se abortito, esci subito
     if (isAborted) {
         console.log('🛑 Worker abortito, interrompo retry navigazione.');
@@ -1217,7 +1232,15 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
         return { success: true };
 
     } catch (error) {
-        isAborted = true; // ← AGGIUNGI QUESTA RIGA
+        workerAbortito = true;
+        
+        // ✅ IGNORA ERRORI TARDIVI
+        if (iscrizioneCompletata) {
+            console.log(`⚠️ Ignorato errore tardivo dopo il completamento: ${error.message}`);
+            return { success: true }; // ← Non inviare errore!
+        }
+        
+        isAborted = true;
         
         console.error('❌ [ISCRIZIONE WORKER] Errore:', error);
 
