@@ -233,14 +233,24 @@ export const iscrivitiGara = async (req, res) => {
                     throw updateError;
                 }
                 
-                // ✅ AVVIA IL WORKER PER L'ISCRIZIONE RIAVVIATA (PASSANDO userId)
-                try {
-                    const { eseguiIscrizioneGara } = await import('../workers/iscrizioneWorker.js');
-                    eseguiIscrizioneGara(existing.id, userId); // ✅ PASSA userId!
-                    console.log(`✅ Worker avviato per iscrizione ${existing.id} (riavvio) con userId ${userId}`);
-                } catch (workerError) {
-                    console.error('❌ Errore caricamento worker (riavvio):', workerError);
-                }
+                // ============================================================
+                // ✅ FIX DOPPIO WORKER — RIMOZIONE AVVIO WORKER DIRETTO
+                // ============================================================
+                // MOTIVO: Il worker veniva avviato QUI dal controller HTTP
+                //         E ANCHE dal WebSocket handler
+                //         (case 'ISCRIZIONE_GIORNI_RICHIESTI'), causando DUE
+                //         worker in parallelo sulla stessa iscrizione.
+                //
+                // SOLUZIONE: Il worker viene avviato SOLO dal WebSocket handler.
+                //            Questo garantisce che l'app sia già connessa e pronta
+                //            a ricevere la lista dei giorni.
+                //
+                // TODO FUTURO: quando verrà implementato il pulsante "Riprova" nel
+                //              frontend, assicurarsi che l'app invii
+                //              'ISCRIZIONE_GIORNI_RICHIESTI' via WebSocket dopo aver
+                //              ricevuto questa risposta HTTP.
+                // ============================================================
+                console.log(`✅ Iscrizione riavviata: ${existing.id} - il worker sarà avviato dall'app via WebSocket`);
                 
                 return res.status(200).json({
                     success: true,
@@ -276,15 +286,30 @@ export const iscrivitiGara = async (req, res) => {
 
         console.log(`✅ Iscrizione creata: ${iscrizione.id}`);
 
-        // ✅ 🔥 AVVIA IL WORKER CON userId (MODIFICA PRINCIPALE!)
-        try {
-            const { eseguiIscrizioneGara } = await import('../workers/iscrizioneWorker.js');
-            eseguiIscrizioneGara(iscrizione.id, userId); // ✅ PASSA userId!
-            console.log(`✅ Worker avviato per iscrizione ${iscrizione.id} con userId ${userId}`);
-        } catch (workerError) {
-            console.error('❌ Errore caricamento worker:', workerError);
-            // Non bloccare la risposta se il worker non parte
-        }
+        // ============================================================
+        // ✅ FIX DOPPIO WORKER — RIMOZIONE AVVIO WORKER DIRETTO
+        // ============================================================
+        // MOTIVO: Il worker veniva avviato DUE VOLTE:
+        //           1. QUI dal controller HTTP (subito dopo la creazione)
+        //           2. Dal WebSocket handler (case 'ISCRIZIONE_GIORNI_RICHIESTI')
+        //         causando DUE worker in parallelo sulla stessa iscrizione.
+        //
+        // FLUSSO CORRETTO ATTUALE:
+        //   1. App → POST /iscrizioni
+        //   2. Controller: crea iscrizione in DB + risponde { id: 87 }
+        //   3. App riceve { id: 87 }
+        //   4. App → WebSocket: ISCRIZIONE_GIORNI_RICHIESTI { idIscrizione: 87 }
+        //   5. WebSocket handler: avvia eseguiIscrizioneGara(87)  ← UNICO PUNTO
+        //   6. Worker: naviga, invia giorni via WebSocket, aspetta scelta utente
+        //
+        // VANTAGGI:
+        //   - Un solo worker per iscrizione
+        //   - Nessun conflitto browser/sessione
+        //   - Notifica WebSocket garantita
+        //   - RAM/CPU dimezzati
+        // ============================================================
+        console.log(`✅ Iscrizione creata: ${iscrizione.id} - il worker sarà avviato dall'app via WebSocket`);
+
 
         // 7. Restituisci risposta immediata
         res.status(201).json({
