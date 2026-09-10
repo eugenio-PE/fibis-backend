@@ -322,7 +322,7 @@ for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
     if (faseAttuale !== 'SELEZIONE_STECCA' || iscrizioneCompletata || workerAbortito) {
         console.log('🛑 Fase cambiata o iscrizione completata, interrompo retry STECCA.');
         steccaRiuscita = true;
-        return;
+        break; // ✅ FIX: break invece di return (per uscire dal loop, non dalla funzione)
     }
     
     // ✅ FIX: Se abortito, esci subito
@@ -645,6 +645,116 @@ await new Promise(resolve => setTimeout(resolve, 1000));
             throw new Error(`Gara non trovata: ${iscrizione.gare.nome}`);
         }
 
+        // ============================================================
+        // 🎯 CHECK BOLLINO ISCRIZIONI (PRE-NAVIGAZIONE) - SOLO LOG
+        // ============================================================
+        // SCOPO ATTUALE: Questo blocco è puramente INFORMATIVO. Legge il bollino
+        //                colorato della colonna "Iscrizioni" (td:eq(7)) della riga
+        //                gara trovata e logga lo stato. NON blocca il flusso: 
+        //                anche se il bollino è giallo/grigio/viola/rosso, il worker
+        //                procede normalmente verso GS_accreditiEvento come prima.
+        //
+        // LEGENDA BOLLINI (dalla pagina GS - colonna "Iscrizioni", file O*.png):
+        //   - Overde.png   → 🟢 Iscrizioni APERTE                 (iscrizioniAperte = true)
+        //   - Ogiallo.png  → 🟡 Iscrizioni NON ANCORA APERTE      (iscrizioniAperte = false)
+        //   - Oviola.png   → 🟣 PREISCRIZIONI APERTE              (iscrizioniAperte = false)
+        //   - Obianco.png  → ⚪ Iscrizioni CHIUSE                  (iscrizioniAperte = false)
+        //   - Orosso.png   → 🔴 Iscrizioni NON DEFINITE           (iscrizioniAperte = false)
+        //
+        // COME TRASFORMARLO IN CONTROLLO BLOCCANTE (futuro):
+        //   1. Sostituire il solo log con un return anticipato + notifica WebSocket.
+        //      Esempio:
+        //        if (!statoIscrizioni.iscrizioniAperte) {
+        //            if (userId) {
+        //                await sendWebSocketMessage(userId, 'ERRORE', {
+        //                    message: `Iscrizioni non aperte (bollino ${statoIscrizioni.colore})`
+        //                });
+        //            }
+        //            // Aggiorna DB
+        //            await supabaseAdmin
+        //                .from('iscrizioni_gare')
+        //                .update({
+        //                    stato: 'iscrizioni_chiuse',
+        //                    ultimo_errore: `Bollino ${statoIscrizioni.colore}`
+        //                })
+        //                .eq('id', idIscrizione);
+        //            return { success: false, error: 'Iscrizioni non aperte' };
+        //        }
+        //   2. Oppure lanciare un throw per far gestire l'errore al catch globale:
+        //        if (!statoIscrizioni.iscrizioniAperte) {
+        //            throw new Error(`Iscrizioni non aperte: bollino ${statoIscrizioni.colore}`);
+        //        }
+        //   3. In entrambi i casi, valutare se per "viola" (preiscrizioni) sia
+        //      comunque possibile procedere con una logica diversa.
+        //
+        // NOTE TECNICHE:
+        //   - Il bollino è un <img> con src tipo "GS_shared/images/Overde.png"
+        //   - La cella ha classe "cm-FULL_3" (stessa del trigger menu contestuale)
+        //   - Il testo della cella include anche le date del periodo iscrizioni
+        // ============================================================
+        try {
+            const statoIscrizioni = await page.evaluate((rowId) => {
+                const row = document.getElementById(rowId);
+                if (!row) return { trovato: false, motivo: 'Riga non trovata' };
+                
+                // La colonna "Iscrizioni" è la 7a (indice 7)
+                const celle = row.querySelectorAll('td');
+                const cellaIscrizioni = celle[7];
+                
+                if (!cellaIscrizioni) {
+                    return { trovato: false, motivo: 'Cella iscrizioni non trovata', numCelle: celle.length };
+                }
+                
+                // Cerca l'immagine del bollino
+                const img = cellaIscrizioni.querySelector('img');
+                const imgSrc = img ? img.getAttribute('src') : null;
+                const lettera = cellaIscrizioni.querySelector('b')?.textContent?.trim() || null;
+                
+                // Determina il colore dal nome file
+                let colore = 'sconosciuto';
+                let iscrizioniAperte = false;
+                
+                if (imgSrc) {
+                    if (imgSrc.includes('Overde')) {
+                        colore = 'verde';
+                        iscrizioniAperte = true;
+                    } else if (imgSrc.includes('Ogiallo')) {
+                        colore = 'giallo';
+                    } else if (imgSrc.includes('Oviola')) {
+                        colore = 'viola';
+                    } else if (imgSrc.includes('Obianco')) {
+                        colore = 'bianco';
+                    } else if (imgSrc.includes('Orosso')) {
+                        colore = 'rosso';
+                    }
+                }
+                
+                return {
+                    trovato: true,
+                    colore: colore,
+                    iscrizioniAperte: iscrizioniAperte,
+                    imgSrc: imgSrc,
+                    lettera: lettera,
+                    testoCompleto: cellaIscrizioni.textContent.trim()
+                };
+            }, garaTrovata.id);
+            
+            console.log('🚦 [CHECK BOLLINO] Stato iscrizioni:', JSON.stringify(statoIscrizioni, null, 2));
+            
+            if (statoIscrizioni.trovato) {
+                if (statoIscrizioni.iscrizioniAperte) {
+                    console.log(`✅ [CHECK BOLLINO] Iscrizioni APERTE (bollino ${statoIscrizioni.colore}, lettera ${statoIscrizioni.lettera})`);
+                } else {
+                    console.log(`⚠️ [CHECK BOLLINO] Iscrizioni NON aperte (bollino ${statoIscrizioni.colore}, lettera ${statoIscrizioni.lettera})`);
+                }
+            } else {
+                console.log(`⚠️ [CHECK BOLLINO] Impossibile determinare stato: ${statoIscrizioni.motivo}`);
+            }
+        } catch (e) {
+            console.log('⚠️ [CHECK BOLLINO] Errore durante il check:', e.message);
+        }
+        // 🎯 FINE CHECK BOLLINO - Il flusso continua come prima
+
 // ============================================================
 // 7. NAVIGAZIONE ALLA PAGINA ISCRIZIONI (ATOMIC CLICK & NAVIGATION)
 // ============================================================
@@ -654,11 +764,11 @@ let navigazioneRiuscita = false;
 let tentativiEffettuati = 0;
 
 for (let tentativo = 1; tentativo <= MAX_TENTATIVI; tentativo++) {
-    // ✅ CONTROLLO COMBINATO
+    // ✅ FIX: Controllo combinato corretto (era commentato dentro //)
     if (iscrizioneCompletata || workerAbortito) {
         console.log('🛑 Retry navigazione ignorato: iscrizione già completata o abortita.');
         navigazioneRiuscita = true;
-        return;
+        break; // ✅ FIX: break invece di return
     }
     
     // ✅ FIX: Se abortito, esci subito
@@ -1056,7 +1166,7 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                 // ============================================================
                 console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
                 let giornoScelto = null;
-                let iscrizioneCompletata = false; // ← AGGIUNGI QUESTA RIGA!
+                // ✅ FIX: RIMOSSA la riga "let iscrizioneCompletata = false;" che ombreggiava il flag esterno
                 const startTimeAttesa = Date.now();
                 const maxWaitTime = 60000;
                 let pollCount = 0;
@@ -1123,7 +1233,7 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                         
                         if (checkData.giorno_iscrizione) {
                             giornoScelto = checkData.giorno_iscrizione;
-                            iscrizioneCompletata = true; // ← AGGIUNGI QUESTA RIGA!
+                            // ✅ FIX: RIMOSSA la riga "iscrizioneCompletata = true;" (era quella locale, non il flag esterno)
                             console.log(`✅ [POLLING #${pollCount}] ✅ GIORNO TROVATO! ➡️ ${giornoScelto}`);
                             console.log(`📊 [POLLING #${pollCount}] Tempo totale attesa: ${elapsed}s`);
                             break;
@@ -1175,37 +1285,118 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                     }
                 }
 
-                console.log('🔍 Ricerca atleta...');
+                // ============================================================
+                // 🎯 SELEZIONE ATLETA TRAMITE MODALE #dialog-elencoIscritti
+                // ============================================================
+                // FLUSSO REALE FIBIS (ricavato dall'ispezione del portale):
+                //   1. input.atletaIscritto è readonly → NON si può digitare
+                //   2. Si clicca img.elencoIscritti → apre modale #dialog-elencoIscritti
+                //   3. Nella modale ci sono i filtri #cognomeF, #nomeF, #cod_tessera
+                //   4. Click #btnFiltraAtleti → ricarica DataTable #elencoAtleti
+                //   5. Click su una riga <tr> di #elencoAtleti → popola input.atletaIscritto
+                //      e chiude automaticamente la modale (vedi JS inline della modale)
+                //   6. Ora si può cliccare Salva
+                // ============================================================
+                console.log('🔍 [SELEZIONE ATLETA] Apro modale elenco atleti...');
                 try {
-                    const inputAtleta = await page.waitForSelector('input.atletaIscritto', { visible: true, timeout: 5000 });
-                    if (inputAtleta) {
-                        await inputAtleta.type(iscrizione.tesserati.cognome, { delay: 100 });
-                        console.log(`✅ Cognome digitato: ${iscrizione.tesserati.cognome}`);
-                        
-                        const lente = await page.waitForSelector('img.elencoIscritti', { visible: true, timeout: 5000 });
-                        if (lente) {
-                            await lente.click();
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                        }
-                        
-                        try {
-                            const atletaTrovato = await page.waitForSelector(
-                                'table tbody tr:first-child, .ui-menu-item, .autocomplete-item',
-                                { visible: true, timeout: 3000 }
-                            );
-                            if (atletaTrovato) {
-                                await atletaTrovato.click();
-                                console.log('✅ Atleta selezionato!');
-                            }
-                        } catch (e) {
-                            console.log('⚠️ Nessun atleta trovato');
-                        }
+                    // 1. Click sulla lente per aprire la modale
+                    await page.waitForSelector('img.elencoIscritti', { visible: true, timeout: 5000 });
+                    await page.click('img.elencoIscritti');
+                    console.log('✅ Click lente eseguito, attendo apertura modale...');
+
+                    // 2. Attendi che la modale sia visibile con contenuto
+                    await page.waitForFunction(() => {
+                        const dlg = document.querySelector('#dialog-elencoIscritti');
+                        if (!dlg) return false;
+                        // Verifica che contenga la tabella degli atleti
+                        return dlg.querySelector('#elencoAtleti') !== null;
+                    }, { timeout: 10000 });
+                    console.log('✅ Modale #dialog-elencoIscritti caricata con #elencoAtleti');
+
+                    // 3. Compila i filtri nella modale
+                    await page.waitForSelector('#cognomeF', { visible: true, timeout: 5000 });
+                    await page.evaluate(() => {
+                        document.querySelector('#cognomeF').value = '';
+                        document.querySelector('#nomeF').value = '';
+                        document.querySelector('#cod_tessera').value = '';
+                    });
+                    await page.type('#cognomeF', iscrizione.tesserati.cognome, { delay: 50 });
+                    console.log(`✅ Cognome digitato nel filtro: ${iscrizione.tesserati.cognome}`);
+                    
+                    if (iscrizione.tesserati.nome) {
+                        await page.type('#nomeF', iscrizione.tesserati.nome, { delay: 50 });
+                        console.log(`✅ Nome digitato nel filtro: ${iscrizione.tesserati.nome}`);
                     }
+
+                    // 4. Click su FILTRA
+                    await page.click('#btnFiltraAtleti');
+                    console.log('✅ Click FILTRA eseguito, attendo risultati...');
+
+                    // 5. Attendi che la DataTable carichi i risultati (righe non vuote)
+                    await page.waitForFunction(() => {
+                        const righe = document.querySelectorAll('#elencoAtleti tbody tr');
+                        if (righe.length === 0) return false;
+                        // Se c'è la riga "Nessun tesserato soddisfa i criteri di ricerca" → non ha trovato nulla
+                        const primaRiga = righe[0];
+                        if (primaRiga.querySelector('.dataTables_empty')) return false;
+                        return true;
+                    }, { timeout: 10000 });
+                    console.log('✅ DataTable #elencoAtleti ha caricato i risultati');
+
+                    // 6. Click sulla riga dell'atleta che matcha cognome + nome
+                    const atletaCliccato = await page.evaluate((cognome, nome) => {
+                        const righe = document.querySelectorAll('#elencoAtleti tbody tr');
+                        const cognomeLower = cognome.toLowerCase().trim();
+                        const nomeLower = nome ? nome.toLowerCase().trim() : '';
+                        
+                        for (const riga of righe) {
+                            // Salta righe vuote
+                            if (riga.querySelector('.dataTables_empty')) continue;
+                            
+                            const testo = riga.textContent.toLowerCase();
+                            // Match cognome (obbligatorio) + nome (se disponibile)
+                            const matchCognome = testo.includes(cognomeLower);
+                            const matchNome = nomeLower ? testo.includes(nomeLower) : true;
+                            
+                            if (matchCognome && matchNome) {
+                                riga.click();
+                                return {
+                                    trovato: true,
+                                    testo: riga.textContent.trim().substring(0, 200)
+                                };
+                            }
+                        }
+                        return { trovato: false };
+                    }, iscrizione.tesserati.cognome, iscrizione.tesserati.nome);
+
+                    if (!atletaCliccato.trovato) {
+                        throw new Error(`Atleta non trovato nei risultati: ${iscrizione.tesserati.cognome} ${iscrizione.tesserati.nome || ''}`);
+                    }
+                    console.log(`✅ Atleta cliccato: ${atletaCliccato.testo}`);
+
+                    // 7. Attendi che input.atletaIscritto sia popolato (la modale si chiude da sola)
+                    await page.waitForFunction(() => {
+                        const inputs = document.querySelectorAll('.atletaIscritto');
+                        for (const input of inputs) {
+                            if (input.value && input.value.trim() !== '') {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }, { timeout: 5000 });
+                    
+                    const valoreAtleta = await page.evaluate(() => {
+                        const input = document.querySelector('.atletaIscritto');
+                        return input ? input.value : null;
+                    });
+                    console.log(`✅ Input atleta popolato: "${valoreAtleta}"`);
+
                 } catch (e) {
-                    console.log('⚠️ Errore ricerca atleta:', e.message);
+                    console.log('⚠️ Errore selezione atleta:', e.message);
+                    throw new Error(`Selezione atleta fallita: ${e.message}`);
                 }
 
-                              console.log('💾 Salvataggio iscrizione...');
+                console.log('💾 Salvataggio iscrizione...');
                 try {
                     const btnSalva = await page.waitForSelector('button.salvaP.show_button', { visible: true, timeout: 5000 });
                     if (btnSalva) {
