@@ -125,6 +125,85 @@ case 'ISCRIZIONE_GIORNO_SCELTO': {
         console.log(`🔄 [WS] Data senza conversione: "${giornoISO}"`);
     }
     
+    // ============================================================
+    // ✅ FIX BUG #1 — VERIFICA POSTI LIBERI PRIMA DI AGGIORNARE IL DB
+    // ============================================================
+    // MOTIVO: L'app permette all'utente di selezionare QUALSIASI giorno,
+    //         anche quelli con "0 posti liberi". Il worker poi tenta
+    //         l'iscrizione e fallisce (o peggio, il portale FIBIS rifiuta).
+    //
+    // SOLUZIONE: Prima di aggiornare il DB, il backend verifica che il
+    //            giorno scelto abbia effettivamente posti liberi.
+    //            Se non li ha, invia un messaggio ERRORE all'app e NON
+    //            aggiorna il DB (il worker non ripartirà).
+    //
+    // NOTA: Questa è una rete di sicurezza lato backend. La vera UX
+    //       dovrebbe impedire all'utente di cliccare giorni pieni
+    //       (fix futura nell'app Flutter).
+    // ============================================================
+    if (giornoScelto !== 'Esubero') {
+        try {
+            const { data: iscrizioneCheck, error: checkError } = await supabaseAdmin
+                .from('iscrizioni_gare')
+                .select('giorni_disponibili')
+                .eq('id', iscrizioneId)
+                .single();
+            
+            if (checkError) {
+                console.log(`⚠️ [WS] Impossibile leggere giorni_disponibili:`, checkError.message);
+                // Non bloccare — procediamo (fallback)
+            } else if (iscrizioneCheck?.giorni_disponibili) {
+                let giorniArray = [];
+                try {
+                    giorniArray = typeof iscrizioneCheck.giorni_disponibili === 'string'
+                        ? JSON.parse(iscrizioneCheck.giorni_disponibili)
+                        : iscrizioneCheck.giorni_disponibili;
+                } catch (e) {
+                    console.log(`⚠️ [WS] Errore parsing giorni_disponibili:`, e.message);
+                }
+                
+                // Cerca il giorno scelto nell'array (match per data o value)
+                const giornoTrovato = giorniArray.find(g => 
+                    g.data === giornoScelto || 
+                    g.value === giornoScelto ||
+                    (g.testo && g.testo.includes(giornoScelto))
+                );
+                
+                if (giornoTrovato) {
+                    const posti = parseInt(giornoTrovato.postiLiberi, 10);
+                    if (posti === 0) {
+                        console.log(`❌ [WS] BLOCCO: giorno ${giornoScelto} ha 0 posti liberi`);
+                        
+                        // Notifica l'utente tramite WebSocket (ERRORE)
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'ERRORE',
+                                payload: {
+                                    message: `Il giorno ${giornoScelto} non ha più posti disponibili. Scegli un altro giorno.`,
+                                    codice: 'GIORNO_PIENO',
+                                    giornoScelto: giornoScelto
+                                }
+                            }));
+                            console.log(`📤 [WS] Inviato ERRORE (GIORNO_PIENO) a utente ${userId}`);
+                        }
+                        
+                        // NON aggiornare il DB — esce dal case
+                        console.log(`📨 [WS] === FINE ISCRIZIONE_GIORNO_SCELTO (BLOCCATO) ===`);
+                        break;
+                    } else {
+                        console.log(`✅ [WS] Giorno ${giornoScelto} ha ${posti} posti liberi — procedo`);
+                    }
+                } else {
+                    console.log(`⚠️ [WS] Giorno ${giornoScelto} non trovato in giorni_disponibili — procedo (fallback)`);
+                }
+            }
+        } catch (checkErr) {
+            console.log(`⚠️ [WS] Eccezione verifica posti:`, checkErr.message);
+            // Non bloccare — procediamo (fallback)
+        }
+    }
+    // ✅ FINE FIX BUG #1
+    
     console.log(`🔍 [WS] Tentativo di aggiornare iscrizione ${iscrizioneId} con giorno: "${giornoISO}", stato: "${nuovoStato}"...`);
     
     try {
