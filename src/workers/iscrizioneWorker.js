@@ -1166,6 +1166,7 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                 // ============================================================
                 console.log('⏳ In attesa della scelta del giorno dell\'utente (max 60 secondi)...');
                 let giornoScelto = null;
+                                let turnoValueScelto = null; // ✅ FIX: per il match univoco del turno
                 // ✅ FIX: RIMOSSA la riga "let iscrizioneCompletata = false;" che ombreggiava il flag esterno
                 const startTimeAttesa = Date.now();
                 const maxWaitTime = 60000;
@@ -1220,7 +1221,7 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                     console.log(`🔍 [POLLING #${pollCount}] Tempo: ${elapsed}s - Lettura database...`);
                     const { data: checkData, error: checkError } = await supabaseAdmin
                         .from('iscrizioni_gare')
-                        .select('giorno_iscrizione, stato')
+                        .select('giorno_iscrizione, turno_value, stato')
                         .eq('id', idIscrizione)
                         .single();
 
@@ -1229,12 +1230,15 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                     } else {
                         console.log(`📊 [POLLING #${pollCount}] DATABASE LETTO:`);
                         console.log(`   - giorno_iscrizione: ${checkData?.giorno_iscrizione || 'null'}`);
+                        console.log(`   - turno_value: ${checkData?.turno_value || 'null'}`);
                         console.log(`   - stato: ${checkData?.stato || 'null'}`);
                         
                         if (checkData.giorno_iscrizione) {
                             giornoScelto = checkData.giorno_iscrizione;
+                            turnoValueScelto = checkData.turno_value;
                             // ✅ FIX: RIMOSSA la riga "iscrizioneCompletata = true;" (era quella locale, non il flag esterno)
                             console.log(`✅ [POLLING #${pollCount}] ✅ GIORNO TROVATO! ➡️ ${giornoScelto}`);
+                            console.log(`   - turno_value: ${turnoValueScelto || '(nessuno)'}`);
                             console.log(`📊 [POLLING #${pollCount}] Tempo totale attesa: ${elapsed}s`);
                             break;
                         } else if (checkData.stato === 'annullata') {
@@ -1267,12 +1271,31 @@ console.log('✅ Giorni salvati nel database (giorno_iscrizione resettato)');
                 }
 
                 console.log(`📌 Data formattata per confronto: ${giornoFormattato}`);
+                console.log(`📌 Turno value per confronto: ${turnoValueScelto || '(nessuno)'}`);
 
-                const giornoSelezionato = giorniDisponibili.find(g => 
-                    g.data === giornoScelto ||      // ISO (fallback)
-                    g.data === giornoFormattato ||  // Italiano (DD/MM/YYYY)
-                    g.value === giornoScelto        // Value diretto
-                );
+                // ✅ FIX: Priorità al turno_value (identificatore univoco)
+                let giornoSelezionato = null;
+
+                if (turnoValueScelto) {
+                    // Match per value (univoco) — PRIORITÀ MASSIMA
+                    giornoSelezionato = giorniDisponibili.find(g => g.value === turnoValueScelto);
+                    if (giornoSelezionato) {
+                        console.log(`✅ Turno trovato per value: ${turnoValueScelto}`);
+                    } else {
+                        console.log(`⚠️ Turno ${turnoValueScelto} non trovato per value, provo fallback data`);
+                    }
+                }
+
+                // Fallback: match per data (per retrocompatibilità o se il value manca)
+                if (!giornoSelezionato) {
+                    giornoSelezionato = giorniDisponibili.find(g => 
+                        g.data === giornoFormattato ||
+                        g.data === giornoScelto
+                    );
+                    if (giornoSelezionato) {
+                        console.log(`✅ Turno trovato per data: ${giornoSelezionato.data} (value: ${giornoSelezionato.value})`);
+                    }
+                }
 
                 if (giornoSelezionato) {
                     console.log(`✅ Giorno trovato: ${giornoSelezionato.data} (value: ${giornoSelezionato.value})`);
