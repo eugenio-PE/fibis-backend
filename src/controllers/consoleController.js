@@ -294,12 +294,17 @@ export const getDettaglioTurno = async (req, res) => {
 // Lista di tutti i manutentori con ruolo 'arbitro'
 // ============================================================
 
+// ============================================================
+// GET /api/console/arbitri-disponibili
+// Lista arbitri disponibili (arbitri + direttori)
+// ============================================================
+
 export const getArbitriDisponibili = async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('manutentori')
-      .select('id, nome, cognome, email, telefono, is_active')
-      .eq('ruolo', 'arbitro')
+      .select('id, nome, cognome, email, telefono, ruolo, is_active')
+      .in('ruolo', ['arbitro', 'direttore'])
       .eq('is_active', true)
       .order('cognome', { ascending: true });
 
@@ -323,6 +328,11 @@ export const getArbitriDisponibili = async (req, res) => {
     });
   }
 };
+
+// ============================================================
+// GET /api/console/arbitri-gara/:idGara
+// Lista arbitri assegnati a una gara
+// ============================================================
 
 // ============================================================
 // GET /api/console/arbitri-gara/:idGara

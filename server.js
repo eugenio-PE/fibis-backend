@@ -21,6 +21,7 @@ import './src/workers/cron.js';
 import comunicatiRoutes from './src/routes/comunicatiRoutes.js';
 import iscrizioniRoutes from './src/routes/iscrizioniRoutes.js';
 import direttoriRoutes from './src/routes/direttoriRoutes.js';
+
 // ✅ IMPORTA IL WEBSOCKET SERVICE
 import { initWebSocketServer } from './src/services/websocketService.js';
 
