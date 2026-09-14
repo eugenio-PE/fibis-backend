@@ -58,41 +58,67 @@ export const getGiorni = async (req, res) => {
       });
     }
 
-    const { data, error } = await supabaseAdmin
+    // 1. Tenta da struttura_gara (dato ufficiale)
+    const { data: struttura, error: strutturaError } = await supabaseAdmin
       .from('struttura_gara')
       .select('giorni, data_inizio_torneo, data_fine_torneo, totale_giorni')
       .eq('id_gara', idGara)
       .maybeSingle();
 
-    if (error) {
-      console.error('❌ Errore query giorni:', error);
-      throw error;
+    if (strutturaError) {
+      console.error('❌ Errore query struttura_gara:', strutturaError);
+      throw strutturaError;
     }
 
-    if (!data) {
-      return res.status(404).json({
-        success: false,
-        error: 'Struttura gara non trovata',
-        codice: 'NOT_FOUND'
+    let giorni = [];
+    let fonte = null;
+
+    if (struttura && struttura.giorni && Array.isArray(struttura.giorni)) {
+      giorni = struttura.giorni
+        .filter(g => g.tipo === 'qualificazione')
+        .map(g => ({
+          data: g.data,
+          tipo: g.tipo,
+          turni: g.turni,
+          descrizione: g.descrizione
+        }));
+      fonte = 'struttura_gara';
+    }
+
+    // 2. Fallback: se vuoto, leggi da iscrizioni_gare
+    if (giorni.length === 0) {
+      const { data: iscrizioni, error: iscrizioniError } = await supabaseAdmin
+        .from('iscrizioni_gare')
+        .select('giorno_iscrizione')
+        .eq('id_gara', idGara)
+        .not('giorno_iscrizione', 'is', null);
+
+      if (iscrizioniError) {
+        console.error('❌ Errore query iscrizioni_gare:', iscrizioniError);
+        throw iscrizioniError;
+      }
+
+      const giorniSet = new Set();
+      (iscrizioni || []).forEach(i => {
+        if (i.giorno_iscrizione) giorniSet.add(i.giorno_iscrizione);
       });
-    }
 
-    // Filtra solo i giorni di qualificazione
-    const giorni = (data.giorni || [])
-      .filter(g => g.tipo === 'qualificazione')
-      .map(g => ({
-        data: g.data,
-        tipo: g.tipo,
-        turni: g.turni,
-        descrizione: g.descrizione
+      giorni = Array.from(giorniSet).sort().map(data => ({
+        data,
+        tipo: 'qualificazione',
+        turni: null,
+        descrizione: null
       }));
+      fonte = 'iscrizioni_gare';
+    }
 
     res.json({
       success: true,
       id_gara: parseInt(idGara),
-      data_inizio_torneo: data.data_inizio_torneo,
-      data_fine_torneo: data.data_fine_torneo,
-      totale_giorni: data.totale_giorni,
+      fonte,
+      data_inizio_torneo: struttura?.data_inizio_torneo || null,
+      data_fine_torneo: struttura?.data_fine_torneo || null,
+      totale_giorni: giorni.length,
       giorni
     });
 
