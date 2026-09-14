@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import http from 'http';
 import presenzeRoutes from './src/routes/presenzeRoutes.js';
-
+import consoleRoutes from './src/routes/consoleRoutes.js';
 // ✅ CARICA LE VARIABILI D'AMBIENTE SUBITO
 dotenv.config();
 
@@ -63,6 +63,7 @@ app.use('/api/notifiche', notificationRoutes);
 app.use('/api/comunicati', comunicatiRoutes);
 app.use('/api/iscrizioni', iscrizioniRoutes);
 app.use('/api/presenze', presenzeRoutes);
+app.use('/api/console', consoleRoutes);
 
 // ============================================================
 // HEALTH CHECK
