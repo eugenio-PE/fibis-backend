@@ -289,3 +289,211 @@ export const getDettaglioTurno = async (req, res) => {
     });
   }
 };
+// ============================================================
+// GET /api/console/arbitri-disponibili
+// Lista di tutti i manutentori con ruolo 'arbitro'
+// ============================================================
+
+export const getArbitriDisponibili = async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('manutentori')
+      .select('id, nome, cognome, email, telefono, is_active')
+      .eq('ruolo', 'arbitro')
+      .eq('is_active', true)
+      .order('cognome', { ascending: true });
+
+    if (error) {
+      console.error('❌ Errore query arbitri disponibili:', error);
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      totale: data?.length || 0,
+      arbitri: data || []
+    });
+
+  } catch (error) {
+    console.error('❌ Errore getArbitriDisponibili:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante il recupero degli arbitri',
+      dettaglio: error.message
+    });
+  }
+};
+
+// ============================================================
+// GET /api/console/arbitri-gara/:idGara
+// Lista arbitri assegnati a una gara
+// ============================================================
+
+export const getArbitriGara = async (req, res) => {
+  try {
+    const { idGara } = req.params;
+
+    if (!idGara) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_gara mancante',
+        codice: 'MISSING_PARAMS'
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('arbitri_gara')
+      .select(`
+        id,
+        id_gara,
+        id_manutentore,
+        ruolo,
+        data_assegnazione,
+        attivo,
+        manutentori:id_manutentore (
+          id, nome, cognome, email, telefono
+        )
+      `)
+      .eq('id_gara', idGara)
+      .eq('attivo', true)
+      .order('data_assegnazione', { ascending: false });
+
+    if (error) {
+      console.error('❌ Errore query arbitri gara:', error);
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      id_gara: parseInt(idGara),
+      totale: data?.length || 0,
+      arbitri: data || []
+    });
+
+  } catch (error) {
+    console.error('❌ Errore getArbitriGara:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante il recupero degli arbitri',
+      dettaglio: error.message
+    });
+  }
+};
+
+// ============================================================
+// POST /api/console/arbitri-gara/:idGara
+// Assegna arbitri a una gara
+// Body: { id_manutentori: [1, 2, 3, ...] }
+// ============================================================
+
+export const assegnaArbitriGara = async (req, res) => {
+  try {
+    const { idGara } = req.params;
+    const { id_manutentori } = req.body;
+
+    if (!idGara) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_gara mancante',
+        codice: 'MISSING_PARAMS'
+      });
+    }
+
+    if (!Array.isArray(id_manutentori) || id_manutentori.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_manutentori mancante o vuoto',
+        codice: 'MISSING_DATA'
+      });
+    }
+
+    // Prepara i record da inserire
+    const records = id_manutentori.map(idMan => ({
+      id_gara: parseInt(idGara),
+      id_manutentore: parseInt(idMan),
+      ruolo: 'arbitro',
+      attivo: true
+    }));
+
+    // Upsert: se già esiste, aggiorna (non duplica)
+    const { data, error } = await supabaseAdmin
+      .from('arbitri_gara')
+      .upsert(records, {
+        onConflict: 'id_gara,id_manutentore',
+        ignoreDuplicates: false
+      })
+      .select();
+
+    if (error) {
+      console.error('❌ Errore upsert arbitri gara:', error);
+      throw error;
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `${data?.length || 0} arbitri assegnati`,
+      assegnati: data || []
+    });
+
+  } catch (error) {
+    console.error('❌ Errore assegnaArbitriGara:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante l\'assegnazione degli arbitri',
+      dettaglio: error.message
+    });
+  }
+};
+
+// ============================================================
+// DELETE /api/console/arbitri-gara/:idGara/:idManutentore
+// Rimuovi un arbitro da una gara
+// ============================================================
+
+export const rimuoviArbitroGara = async (req, res) => {
+  try {
+    const { idGara, idManutentore } = req.params;
+
+    if (!idGara || !idManutentore) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parametri mancanti',
+        codice: 'MISSING_PARAMS'
+      });
+    }
+
+    // Soft delete: imposta attivo = false
+    const { data, error } = await supabaseAdmin
+      .from('arbitri_gara')
+      .update({ attivo: false })
+      .eq('id_gara', idGara)
+      .eq('id_manutentore', idManutentore)
+      .select();
+
+    if (error) {
+      console.error('❌ Errore rimozione arbitro:', error);
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assegnazione non trovata',
+        codice: 'NOT_FOUND'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Arbitro rimosso dalla gara'
+    });
+
+  } catch (error) {
+    console.error('❌ Errore rimuoviArbitroGara:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante la rimozione dell\'arbitro',
+      dettaglio: error.message
+    });
+  }
+};

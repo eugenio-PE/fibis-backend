@@ -3,7 +3,11 @@ import {
   getGare,
   getGiorni,
   getTurni,
-  getDettaglioTurno
+  getDettaglioTurno,
+  getArbitriDisponibili,
+  getArbitriGara,
+  assegnaArbitriGara,
+  rimuoviArbitroGara
 } from '../controllers/consoleController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
@@ -46,6 +50,41 @@ router.get(
   authenticate,
   requireRole(CONSOLE_ROLES),
   getDettaglioTurno
+);
+// ============================================================
+// ROTTE ARBITRI
+// ============================================================
+
+// GET: Arbitri disponibili (ruolo = 'arbitro')
+router.get(
+  '/arbitri-disponibili',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  getArbitriDisponibili
+);
+
+// GET: Arbitri assegnati a una gara
+router.get(
+  '/arbitri-gara/:idGara',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  getArbitriGara
+);
+
+// POST: Assegna arbitri a una gara
+router.post(
+  '/arbitri-gara/:idGara',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  assegnaArbitriGara
+);
+
+// DELETE: Rimuovi arbitro da una gara
+router.delete(
+  '/arbitri-gara/:idGara/:idManutentore',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  rimuoviArbitroGara
 );
 
 export default router;

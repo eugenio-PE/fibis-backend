@@ -20,7 +20,7 @@ import notificationRoutes from './src/routes/notificationRoutes.js';
 import './src/workers/cron.js';
 import comunicatiRoutes from './src/routes/comunicatiRoutes.js';
 import iscrizioniRoutes from './src/routes/iscrizioniRoutes.js';
-
+import direttoriRoutes from './src/routes/direttoriRoutes.js';
 // ✅ IMPORTA IL WEBSOCKET SERVICE
 import { initWebSocketServer } from './src/services/websocketService.js';
 
@@ -64,6 +64,7 @@ app.use('/api/comunicati', comunicatiRoutes);
 app.use('/api/iscrizioni', iscrizioniRoutes);
 app.use('/api/presenze', presenzeRoutes);
 app.use('/api/console', consoleRoutes);
+app.use('/api/direttori', direttoriRoutes);
 
 // ============================================================
 // HEALTH CHECK
