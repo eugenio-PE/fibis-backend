@@ -824,7 +824,7 @@ export const aggiornaChiamata = async (req, res) => {
         .update({
           esito: 'terminata',
           data_fine: new Date().toISOString(),
-          vincitore_tavolino: vincitore  // riutilizziamo il campo
+          vincitore_tavolino: vincitore
         })
         .eq('id', id);
 
@@ -833,8 +833,33 @@ export const aggiornaChiamata = async (req, res) => {
         .update({ stato: 'terminata' })
         .eq('id', chiamata.id_batteria_partita);
 
-      // TODO PRODUZIONE: aggiornare automaticamente il tabellone
-      // (semifinali, finale) con il vincitore.
+      // ============================================================
+      // POPOLAMENTO AUTOMATICO FASE SUCCESSIVA
+      // ============================================================
+      // Quando una partita termina con un vincitore, il vincitore
+      // viene inserito nella fase successiva:
+      // - Q1 → S1 posto 1
+      // - Q2 → S1 posto 2
+      // - Q3 → S2 posto 1
+      // - Q4 → S2 posto 2
+      // - S1 → Finale posto 1
+      // - S2 → Finale posto 2
+      //
+      // TODO PRODUZIONE: questo popolamento sarà automatico anche
+      // da GCS/FIBIS quando arriverà il risultato ufficiale.
+      // Per ora: lo facciamo qui quando Luca clicca "Termina".
+      // ============================================================
+      if (vincitore) {
+        await popolaFaseSuccessiva(
+          chiamata.id_gara,
+          partita.giorno,
+          partita.turno_value,
+          partita.numero_batteria,
+          partita.fase,
+          partita.posizione,
+          vincitore
+        );
+      }
 
       return res.json({
         success: true,
@@ -882,7 +907,21 @@ export const aggiornaChiamata = async (req, res) => {
         .update({ stato: 'vittoria_tavolino' })
         .eq('id', chiamata.id_batteria_partita);
 
-      // TODO PRODUZIONE: aggiornare automaticamente il tabellone
+      // ============================================================
+      // POPOLAMENTO AUTOMATICO FASE SUCCESSIVA
+      // ============================================================
+      // TODO PRODUZIONE: questo popolamento sarà automatico anche
+      // da GCS/FIBIS quando arriverà il risultato ufficiale.
+      // ============================================================
+      await popolaFaseSuccessiva(
+        chiamata.id_gara,
+        partita.giorno,
+        partita.turno_value,
+        partita.numero_batteria,
+        partita.fase,
+        partita.posizione,
+        vincitore_tavolino
+      );
 
       return res.json({
         success: true,
@@ -1124,5 +1163,75 @@ export const rimuoviArbitroGara = async (req, res) => {
       error: 'Errore durante la rimozione dell\'arbitro',
       dettaglio: error.message
     });
+  }
+};
+// ============================================================
+// FUNZIONE HELPER: popolaFaseSuccessiva
+// Quando un quarto/semifinale termina, il vincitore va nella
+// fase successiva (semifinale/finale).
+// ============================================================
+//
+// Regole di popolamento:
+// - Q1 (quarti, pos 1) → S1 (semifinale, pos 1) posto 1
+// - Q2 (quarti, pos 2) → S1 (semifinale, pos 1) posto 2
+// - Q3 (quarti, pos 3) → S2 (semifinale, pos 2) posto 1
+// - Q4 (quarti, pos 4) → S2 (semifinale, pos 2) posto 2
+// - S1 (semifinale, pos 1) → F1 (finale, pos 1) posto 1
+// - S2 (semifinale, pos 2) → F1 (finale, pos 1) posto 2
+//
+// TODO PRODUZIONE: questa funzione sarà chiamata automaticamente
+// quando lo scraper GCS/FIBIS rileva la fine di una partita.
+// ============================================================
+
+const popolaFaseSuccessiva = async (
+  idGara,
+  giorno,
+  turnoValue,
+  numeroBatteria,
+  faseAttuale,
+  posizioneAttuale,
+  vincitoreId
+) => {
+  try {
+    // Determina fase successiva
+    let faseSuccessiva, posizioneFaseSuccessiva, campoDaPopolare;
+
+    if (faseAttuale === 'quarti') {
+      faseSuccessiva = 'semifinale';
+      // Q1, Q2 → S1 (pos 1); Q3, Q4 → S2 (pos 2)
+      posizioneFaseSuccessiva = posizioneAttuale <= 2 ? 1 : 2;
+      // Q1, Q3 → posto 1 (id_tesserato_1); Q2, Q4 → posto 2 (id_tesserato_2)
+      campoDaPopolare = (posizioneAttuale % 2 === 1) ? 'id_tesserato_1' : 'id_tesserato_2';
+    } else if (faseAttuale === 'semifinale') {
+      faseSuccessiva = 'finale';
+      posizioneFaseSuccessiva = 1;
+      // S1 → posto 1; S2 → posto 2
+      campoDaPopolare = (posizioneAttuale === 1) ? 'id_tesserato_1' : 'id_tesserato_2';
+    } else {
+      // finale → nessuna fase successiva
+      return;
+    }
+
+    // Aggiorna la fase successiva
+    const { error: updateError } = await supabaseAdmin
+      .from('batterie_turno')
+      .update({ [campoDaPopolare]: vincitoreId })
+      .eq('id_gara', idGara)
+      .eq('giorno', giorno)
+      .eq('turno_value', turnoValue)
+      .eq('numero_batteria', numeroBatteria)
+      .eq('fase', faseSuccessiva)
+      .eq('posizione', posizioneFaseSuccessiva);
+
+    if (updateError) {
+      console.error('❌ Errore popolamento fase successiva:', updateError);
+      throw updateError;
+    }
+
+    console.log(`✅ Vincitore ${vincitoreId} inserito in ${faseSuccessiva} pos ${posizioneFaseSuccessiva} (${campoDaPopolare})`);
+
+  } catch (error) {
+    console.error('❌ Errore popolaFaseSuccessiva:', error);
+    // Non bloccare la risposta principale
   }
 };
