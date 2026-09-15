@@ -4,6 +4,9 @@ import {
   getGiorni,
   getTurni,
   getDettaglioTurno,
+  getBatterieTurno,           // ← NUOVO
+  chiamaPartita,           // ← NUOVO
+  aggiornaChiamata,        // ← NUOVO
   getArbitriDisponibili,
   getArbitriGara,
   assegnaArbitriGara,
@@ -85,6 +88,36 @@ router.delete(
   authenticate,
   requireRole(CONSOLE_ROLES),
   rimuoviArbitroGara
+);
+// ============================================================
+// ROTTE BATTERIE
+// ============================================================
+
+// GET: Batterie del turno (con giocatori, check-in, arbitro)
+router.get(
+  '/batterie/:idGara/:turno',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  getBatterieTurno
+);
+// ============================================================
+// ROTTE CHIAMATA PARTITA
+// ============================================================
+
+// POST: Chiama una partita (crea chiamata + push)
+router.post(
+  '/chiamata',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  chiamaPartita
+);
+
+// PUT: Aggiorna stato chiamata
+router.put(
+  '/chiamata/:id',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  aggiornaChiamata
 );
 
 export default router;

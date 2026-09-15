@@ -50,8 +50,15 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    // 3. Verifica giorno di gara
-    const oggi = getOggiItalia();
+    // 3. Calcola oggi e ieri in fuso italiano
+    const now = new Date();
+    const oggi = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
+    
+    const ieriDate = new Date(now);
+    ieriDate.setDate(ieriDate.getDate() - 1);
+    const ieri = ieriDate.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
+
+    // 4. Verifica giorno di gara
     const giornoGara = iscrizione.giorno_iscrizione;
 
     if (!giornoGara) {
@@ -62,25 +69,63 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    if (oggi < giornoGara) {
-      return res.status(422).json({
-        success: false,
-        error: 'Non è il giorno di gara del tesserato',
-        codice: 'NOT_GAME_DAY',
-        dettaglio: `Oggi: ${oggi}, Giorno di gara: ${giornoGara}`
-      });
-    }
+    // 5. Logica di verifica data
+    // ============================================================
+    // FIX TURNI SERALI OLTRE MEZZANOTTE
+    // Se il giorno di gara è "ieri" e siamo in finestra notturna
+    // (00:00-06:00), il check-in è permesso.
+    // ============================================================
+    let checkInPermesso = false;
+    let motivoErrore = null;
 
-    if (oggi > giornoGara) {
-      return res.status(422).json({
-        success: false,
-        error: 'Il giorno di gara del tesserato è già passato',
+    if (giornoGara === oggi) {
+      // Caso normale: è il giorno di gara
+      checkInPermesso = true;
+    } else if (giornoGara === ieri) {
+      // Caso turno serale oltre mezzanotte: verifica finestra notturna
+      const oraItaliana = parseInt(
+        now.toLocaleString('it-IT', {
+          timeZone: 'Europe/Rome',
+          hour: '2-digit',
+          hour12: false
+        })
+      );
+
+      if (oraItaliana >= 0 && oraItaliana < 6) {
+        // Siamo tra 00:00 e 05:59 → check-in permesso
+        checkInPermesso = true;
+      } else {
+        // Dopo le 6 → turno passato
+        motivoErrore = {
+          error: 'Il giorno di gara è passato',
+          codice: 'GAME_DAY_PASSED',
+          dettaglio: `Oggi: ${oggi}, Giorno di gara: ${giornoGara}`
+        };
+      }
+    } else if (giornoGara < oggi) {
+      // Giorno passato (> 1 giorno fa)
+      motivoErrore = {
+        error: 'Il giorno di gara è passato',
         codice: 'GAME_DAY_PASSED',
         dettaglio: `Oggi: ${oggi}, Giorno di gara: ${giornoGara}`
+      };
+    } else {
+      // Giorno futuro
+      motivoErrore = {
+        error: 'Non è ancora il giorno di gara del tesserato',
+        codice: 'NOT_GAME_DAY',
+        dettaglio: `Oggi: ${oggi}, Giorno di gara: ${giornoGara}`
+      };
+    }
+
+    if (!checkInPermesso) {
+      return res.status(422).json({
+        success: false,
+        ...motivoErrore
       });
     }
 
-    // 4. Verifica "eliminato" (partita persa)
+    // 6. Verifica "eliminato" (partita persa)
     if (iscrizione.eliminato === true) {
       return res.status(422).json({
         success: false,
@@ -89,7 +134,7 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    // 5. Verifica check-in già effettuato
+    // 7. Verifica check-in già effettuato
     const { data: presenzaEsistente, error: presenzaError } = await supabaseAdmin
       .from('presenze_gare')
       .select('id, data_scansione')
@@ -113,7 +158,7 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    // 6. Recupera l'operatore (manutentore) dal user_id
+    // 8. Recupera l'operatore (manutentore) dal user_id
     let id_operatore = null;
     if (req.userId) {
       const { data: manutentore } = await supabaseAdmin
@@ -127,7 +172,7 @@ export const checkIn = async (req, res) => {
       }
     }
 
-    // 7. Inserisci presenza
+    // 9. Inserisci presenza
     const { data: presenza, error: insertError } = await supabaseAdmin
       .from('presenze_gare')
       .insert({
@@ -142,7 +187,6 @@ export const checkIn = async (req, res) => {
       .single();
 
     if (insertError) {
-      // Gestione duplicato (vincolo UNIQUE)
       if (insertError.code === '23505') {
         return res.status(409).json({
           success: false,
@@ -154,14 +198,14 @@ export const checkIn = async (req, res) => {
       throw insertError;
     }
 
-    // 8. Recupera dati tesserato per la risposta
+    // 10. Recupera dati tesserato
     const { data: tesserato } = await supabaseAdmin
       .from('tesserati')
       .select('id, nome, cognome, matricola, categoria')
       .eq('id', id_tesserato)
       .single();
 
-    // 9. Risposta successo
+    // 11. Risposta
     res.status(201).json({
       success: true,
       message: 'Check-in registrato',
@@ -189,7 +233,6 @@ export const checkIn = async (req, res) => {
     });
   }
 };
-
 // ============================================================
 // GET /api/presenze/turno/:idGara/:turno
 // ============================================================
