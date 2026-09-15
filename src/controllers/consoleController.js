@@ -356,6 +356,22 @@ export const getBatterieTurno = async (req, res) => {
       });
     }
 
+    // 1b. Recupera l'ultima chiamata per ogni partita
+    const idsPartite = batterie.map(b => b.id);
+    const { data: chiamateRecenti } = await supabaseAdmin
+      .from('chiamate_partite')
+      .select('id, id_batteria_partita, numero_chiamata, data_chiamata, biliardo, esito')
+      .in('id_batteria_partita', idsPartite)
+      .order('data_chiamata', { ascending: false });
+
+    // Mappa: id_batteria_partita → chiamata più recente
+    const chiamateMap = {};
+    (chiamateRecenti || []).forEach(c => {
+      if (!chiamateMap[c.id_batteria_partita]) {
+        chiamateMap[c.id_batteria_partita] = c;
+      }
+    });
+
     // 2. Recupera tutti gli id_tesserato coinvolti
     const idTesserati = new Set();
     batterie.forEach(b => {
@@ -429,6 +445,8 @@ export const getBatterieTurno = async (req, res) => {
         giocatore2?.presente === true &&
         b.stato === 'attesa';
 
+      const ultimaChiamata = chiamateMap[b.id];
+
       batterieMap[numBatt].partite.push({
         id: b.id,
         fase: b.fase,
@@ -441,7 +459,15 @@ export const getBatterieTurno = async (req, res) => {
           cognome: b.arbitro.cognome
         } : null,
         stato: b.stato,
-        pronta: pronta
+        pronta: pronta,
+        // NUOVO: info ultima chiamata
+        ultima_chiamata: ultimaChiamata ? {
+          id: ultimaChiamata.id,
+          numero_chiamata: ultimaChiamata.numero_chiamata,
+          data_chiamata: ultimaChiamata.data_chiamata,
+          biliardo: ultimaChiamata.biliardo,
+          esito: ultimaChiamata.esito
+        } : null
       });
     });
 
@@ -627,21 +653,26 @@ export const chiamaPartita = async (req, res) => {
 
 // ============================================================
 // PUT /api/console/chiamata/:id
-// Aggiorna stato chiamata (2ª chiamata, inizio, fine, tavolino)
+// Aggiorna stato chiamata (2ª chiamata, inizia, termina, tavolino)
 // ============================================================
 //
 // Azioni supportate:
-// - "seconda_chiamata": crea una nuova riga chiamata (numero_chiamata++)
+// - "seconda_chiamata": crea una nuova riga chiamata (numero_chiamata: 2)
+// - "terza_chiamata": crea una nuova riga chiamata (numero_chiamata: 3)
 // - "inizia": partita inizia (richiede entrambi presenti)
-// - "termina": partita termina
+// - "termina": partita termina (con vincitore opzionale)
 // - "vittoria_tavolino": assegna vittoria a tavolino
+//
+// TODO PRODUZIONE: le azioni "termina" e "vittoria_tavolino" saranno
+// automatiche quando arriverà il risultato da GCS/FIBIS. Per ora
+// sono manuali (Luca le esegue dalla Console).
 //
 // ============================================================
 
 export const aggiornaChiamata = async (req, res) => {
   try {
     const { id } = req.params;
-    const { azione, vincitore_tavolino } = req.body;
+    const { azione, vincitore_tavolino, vincitore_id } = req.body;
 
     if (!azione) {
       return res.status(400).json({
@@ -688,7 +719,7 @@ export const aggiornaChiamata = async (req, res) => {
     }
 
     // ============================================================
-    // AZIONE: seconda_chiamata
+    // AZIONE: seconda_chiamata / terza_chiamata
     // ============================================================
     if (azione === 'seconda_chiamata' || azione === 'terza_chiamata') {
       const numeroChiamata = azione === 'seconda_chiamata' ? 2 : 3;
@@ -743,13 +774,11 @@ export const aggiornaChiamata = async (req, res) => {
         });
       }
 
-      // Aggiorna chiamata
       await supabaseAdmin
         .from('chiamate_partite')
         .update({ esito: 'in_corso', data_inizio: new Date().toISOString() })
         .eq('id', id);
 
-      // Aggiorna partita
       await supabaseAdmin
         .from('batterie_turno')
         .update({ stato: 'in_corso' })
@@ -763,12 +792,35 @@ export const aggiornaChiamata = async (req, res) => {
     }
 
     // ============================================================
-    // AZIONE: termina
+    // AZIONE: termina (con vincitore opzionale)
+    // ============================================================
+    // TODO PRODUZIONE: questa azione sarà automatica quando arriverà
+    // il risultato da GCS/FIBIS. Il backend riceverà una notifica
+    // con il vincitore e aggiornerà automaticamente.
+    //
+    // Per ora: Luca clicca "Termina Partita" e seleziona il vincitore.
     // ============================================================
     if (azione === 'termina') {
+      // Verifica vincitore_id (opzionale)
+      let vincitore = vincitore_id || null;
+
+      if (vincitore) {
+        if (vincitore !== partita.id_tesserato_1 && vincitore !== partita.id_tesserato_2) {
+          return res.status(400).json({
+            success: false,
+            error: 'vincitore_id non è un giocatore di questa partita',
+            codice: 'INVALID_WINNER'
+          });
+        }
+      }
+
       await supabaseAdmin
         .from('chiamate_partite')
-        .update({ esito: 'terminata', data_fine: new Date().toISOString() })
+        .update({
+          esito: 'terminata',
+          data_fine: new Date().toISOString(),
+          vincitore_tavolino: vincitore  // riutilizziamo il campo
+        })
         .eq('id', id);
 
       await supabaseAdmin
@@ -776,15 +828,22 @@ export const aggiornaChiamata = async (req, res) => {
         .update({ stato: 'terminata' })
         .eq('id', chiamata.id_batteria_partita);
 
+      // TODO PRODUZIONE: aggiornare automaticamente il tabellone
+      // (semifinali, finale) con il vincitore.
+
       return res.json({
         success: true,
         message: 'Partita terminata',
-        esito: 'terminata'
+        esito: 'terminata',
+        vincitore
       });
     }
 
     // ============================================================
     // AZIONE: vittoria_tavolino
+    // ============================================================
+    // TODO PRODUZIONE: anche questa azione sarà automatica se il
+    // giocatore non si presenta. Per ora: Luca la esegue manualmente.
     // ============================================================
     if (azione === 'vittoria_tavolino') {
       if (!vincitore_tavolino) {
@@ -795,7 +854,6 @@ export const aggiornaChiamata = async (req, res) => {
         });
       }
 
-      // Verifica che il vincitore sia uno dei due giocatori
       if (vincitore_tavolino !== partita.id_tesserato_1 && 
           vincitore_tavolino !== partita.id_tesserato_2) {
         return res.status(400).json({
@@ -819,8 +877,7 @@ export const aggiornaChiamata = async (req, res) => {
         .update({ stato: 'vittoria_tavolino' })
         .eq('id', chiamata.id_batteria_partita);
 
-      // TODO PRODUZIONE: aggiornare il tabellone (semifinali, finale)
-      // con il vincitore a tavolino
+      // TODO PRODUZIONE: aggiornare automaticamente il tabellone
 
       return res.json({
         success: true,
