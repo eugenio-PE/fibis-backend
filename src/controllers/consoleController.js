@@ -692,7 +692,7 @@ export const aggiornaChiamata = async (req, res) => {
       .select(`
         id, id_batteria_partita, id_gara, numero_chiamata, id_arbitro, biliardo, esito, timer_minuti,
         batteria:batterie_turno!chiamate_partite_id_batteria_partita_fkey (
-          id, id_tesserato_1, id_tesserato_2, id_arbitro, stato, giorno, turno_value
+          id, id_tesserato_1, id_tesserato_2, id_arbitro, stato, giorno, turno_value, numero_batteria, posizione, fase
         )
       `)
       .eq('id', id)
