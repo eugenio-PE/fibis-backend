@@ -360,7 +360,7 @@ export const getBatterieTurno = async (req, res) => {
     const idsPartite = batterie.map(b => b.id);
     const { data: chiamateRecenti } = await supabaseAdmin
       .from('chiamate_partite')
-      .select('id, id_batteria_partita, numero_chiamata, data_chiamata, biliardo, esito')
+      .select('id, id_batteria_partita, numero_chiamata, data_chiamata, biliardo, esito, timer_minuti, vincitore_tavolino')
       .in('id_batteria_partita', idsPartite)
       .order('data_chiamata', { ascending: false });
 
@@ -466,7 +466,9 @@ export const getBatterieTurno = async (req, res) => {
           numero_chiamata: ultimaChiamata.numero_chiamata,
           data_chiamata: ultimaChiamata.data_chiamata,
           biliardo: ultimaChiamata.biliardo,
-          esito: ultimaChiamata.esito
+          esito: ultimaChiamata.esito,
+          timer_minuti: ultimaChiamata.timer_minuti || 10,
+          vincitore_tavolino: ultimaChiamata.vincitore_tavolino
         } : null
       });
     });
@@ -507,7 +509,7 @@ export const getBatterieTurno = async (req, res) => {
 
 export const chiamaPartita = async (req, res) => {
   try {
-    const { id_batteria_partita, biliardo } = req.body;
+    const { id_batteria_partita, biliardo, timer_minuti } = req.body;
 
     if (!id_batteria_partita) {
       return res.status(400).json({
@@ -592,6 +594,7 @@ export const chiamaPartita = async (req, res) => {
         id_operatore,
         id_arbitro: partita.id_arbitro,
         biliardo: biliardo || null,
+        timer_minuti: timer_minuti || 10,
         esito: 'in_attesa'
       })
       .select()
@@ -627,6 +630,7 @@ export const chiamaPartita = async (req, res) => {
         numero_chiamata: chiamata.numero_chiamata,
         data_chiamata: chiamata.data_chiamata,
         biliardo: chiamata.biliardo,
+        timer_minuti: chiamata.timer_minuti,
         arbitro: partita.arbitro,
         esito: chiamata.esito
       },
