@@ -5,6 +5,7 @@ import {
   getTurni,
   getDettaglioTurno,
   getBatterieTurno,           // ← NUOVO
+  getArbitriPerGara,        // ← NUOVO
   chiamaPartita,           // ← NUOVO
   aggiornaChiamata,        // ← NUOVO
   getArbitriDisponibili,
@@ -72,6 +73,13 @@ router.get(
   authenticate,
   requireRole(CONSOLE_ROLES),
   getArbitriGara
+);
+// GET: Arbitri per gara (con stato)
+router.get(
+  '/arbitri-per-gara/:idGara',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  getArbitriPerGara
 );
 
 // POST: Assegna arbitri a una gara

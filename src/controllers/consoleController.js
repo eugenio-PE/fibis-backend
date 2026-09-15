@@ -509,7 +509,7 @@ export const getBatterieTurno = async (req, res) => {
 
 export const chiamaPartita = async (req, res) => {
   try {
-    const { id_batteria_partita, biliardo, timer_minuti } = req.body;
+    const { id_batteria_partita, biliardo, timer_minuti, id_arbitro } = req.body;
 
     if (!id_batteria_partita) {
       return res.status(400).json({
@@ -592,7 +592,7 @@ export const chiamaPartita = async (req, res) => {
         id_gara: partita.id_gara,
         numero_chiamata: 1,
         id_operatore,
-        id_arbitro: partita.id_arbitro,
+        id_arbitro: id_arbitro || partita.id_arbitro,
         biliardo: biliardo || null,
         timer_minuti: timer_minuti || 10,
         esito: 'in_attesa'
@@ -605,10 +605,14 @@ export const chiamaPartita = async (req, res) => {
       throw chiamataError;
     }
 
-    // 6. Aggiorna stato partita
+    // 6. Aggiorna stato partita (e arbitro se cambiato)
+    const updatePartita = { stato: 'chiamata' };
+    if (id_arbitro && id_arbitro !== partita.id_arbitro) {
+      updatePartita.id_arbitro = id_arbitro;
+    }
     await supabaseAdmin
       .from('batterie_turno')
-      .update({ stato: 'chiamata' })
+      .update(updatePartita)
       .eq('id', id_batteria_partita);
 
     // ============================================================
@@ -1233,5 +1237,109 @@ const popolaFaseSuccessiva = async (
   } catch (error) {
     console.error('❌ Errore popolaFaseSuccessiva:', error);
     // Non bloccare la risposta principale
+  }
+};
+// ============================================================
+// GET /api/console/arbitri-per-gara/:idGara
+// Restituisce tutti gli arbitri assegnati alla gara con stato
+// ============================================================
+//
+// Per ogni arbitro:
+// - impegnato: true se ha partite 'in_corso'
+// - partite_assegnate: lista partite 'chiamata' o 'in_corso'
+//
+// Luca vede TUTTI gli arbitri, con evidenziazione.
+// ============================================================
+
+export const getArbitriPerGara = async (req, res) => {
+  try {
+    const { idGara } = req.params;
+
+    if (!idGara) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_gara mancante',
+        codice: 'MISSING_PARAMS'
+      });
+    }
+
+    // 1. Recupera arbitri assegnati alla gara
+    const { data: arbitriGara, error: arbitriError } = await supabaseAdmin
+      .from('arbitri_gara')
+      .select(`
+        id_manutentore,
+        ruolo,
+        manutentori:id_manutentore (
+          id, nome, cognome, email
+        )
+      `)
+      .eq('id_gara', idGara)
+      .eq('attivo', true);
+
+    if (arbitriError) {
+      console.error('❌ Errore query arbitri gara:', arbitriError);
+      throw arbitriError;
+    }
+
+    // 2. Recupera partite chiamate/in_corso della gara
+    const { data: partite, error: partiteError } = await supabaseAdmin
+      .from('batterie_turno')
+      .select('id, numero_batteria, fase, posizione, id_arbitro, stato')
+      .eq('id_gara', idGara)
+      .in('stato', ['chiamata', 'in_corso'])
+      .not('id_arbitro', 'is', null);
+
+    if (partiteError) {
+      console.error('❌ Errore query partite:', partiteError);
+      throw partiteError;
+    }
+
+    // 3. Mappa: id_arbitro → lista partite
+    const partitePerArbitro = {};
+    (partite || []).forEach(p => {
+      if (!partitePerArbitro[p.id_arbitro]) {
+        partitePerArbitro[p.id_arbitro] = [];
+      }
+      partitePerArbitro[p.id_arbitro].push({
+        id: p.id,
+        numero_batteria: p.numero_batteria,
+        fase: p.fase,
+        posizione: p.posizione,
+        stato: p.stato
+      });
+    });
+
+    // 4. Combina
+    const arbitri = (arbitriGara || []).map(a => {
+      const partiteAssegnate = partitePerArbitro[a.id_manutentore] || [];
+      const inCorso = partiteAssegnate.filter(p => p.stato === 'in_corso');
+      const chiamate = partiteAssegnate.filter(p => p.stato === 'chiamata');
+
+      return {
+        id: a.id_manutentore,
+        nome: a.manutentori?.nome || '',
+        cognome: a.manutentori?.cognome || '',
+        email: a.manutentori?.email || '',
+        ruolo: a.ruolo,
+        impegnato: inCorso.length > 0,
+        partite_assegnate: partiteAssegnate,
+        ha_partite_chiamate: chiamate.length > 0
+      };
+    });
+
+    res.json({
+      success: true,
+      id_gara: parseInt(idGara),
+      totale: arbitri.length,
+      arbitri
+    });
+
+  } catch (error) {
+    console.error('❌ Errore getArbitriPerGara:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante il recupero degli arbitri',
+      dettaglio: error.message
+    });
   }
 };
