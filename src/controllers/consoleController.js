@@ -2,6 +2,25 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { inviaPushChiamata } from '../services/firebaseService.js';
 
 // ============================================================
+// TODO PRODUZIONE — INTEGRAZIONE GCS
+// ============================================================
+// In produzione, il backend si integrerà con GCS (segnapunti
+// digitale) per ricevere in tempo reale:
+// - Inizio partita (rilevato dal segnapunti)
+// - Punteggi in tempo reale
+// - Fine partita + vincitore
+//
+// Campi da aggiungere in futuro:
+// - batterie_turno.gcs_match_id (TEXT) → collega partita FIBIS a GCS
+// - chiamate_partite.gcs_match_id (TEXT) → idem
+//
+// Endpoint futuri (webhook da GCS):
+// - POST /api/gcs/partita-iniziata
+// - POST /api/gcs/punteggio
+// - POST /api/gcs/partita-finita
+// ============================================================
+
+// ============================================================
 // GET /api/console/gare
 // Restituisce la lista delle gare, filtrabili per tipologia
 // ============================================================
@@ -452,11 +471,15 @@ export const getBatterieTurno = async (req, res) => {
 
       // Determina se la partita è "pronta"
       // (entrambi presenti e partita non ancora terminata)
-      const pronta = 
-        giocatore1?.presente === true && 
-        giocatore2?.presente === true &&
-        b.stato === 'attesa';
+     // const pronta = 
+        //giocatore1?.presente === true && 
+       // giocatore2?.presente === true &&
+       // b.stato === 'attesa';
 
+       // "Inizia" abilitato se la partita è stata chiamata
+
+// (Luca decide se i giocatori sono al tavolo)
+const pronta = b.stato === 'chiamata';
       const ultimaChiamata = chiamateMap[b.id];
 
       batterieMap[numBatt].partite.push({
@@ -804,6 +827,13 @@ export const aggiornaChiamata = async (req, res) => {
     // AZIONE: inizia
     // ============================================================
     if (azione === 'inizia') {
+            // ============================================================
+      // TODO PRODUZIONE: in produzione, l'inizio partita sarà
+      // rilevato automaticamente da GCS (segnapunti digitale).
+      // Il backend riceverà una notifica "partita iniziata" e
+      // aggiornerà lo stato a 'in_corso'. Per ora: Luca clicca
+      // "Inizia" dalla Console.
+      // ============================================================
       // Verifica che entrambi i giocatori siano presenti
       const { data: presenze } = await supabaseAdmin
         .from('presenze_gare')
@@ -852,6 +882,13 @@ export const aggiornaChiamata = async (req, res) => {
     // Per ora: Luca clicca "Termina Partita" e seleziona il vincitore.
     // ============================================================
     if (azione === 'termina') {
+            // ============================================================
+      // TODO PRODUZIONE: in produzione, la fine partita e il vincitore
+      // saranno rilevati automaticamente da GCS. Il backend riceverà
+      // il risultato finale (punteggio + vincitore) e aggiornerà
+      // automaticamente. Per ora: Luca clicca "Termina" e seleziona
+      // il vincitore.
+      // ============================================================
       // Verifica vincitore_id (opzionale)
       let vincitore = vincitore_id || null;
 
