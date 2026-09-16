@@ -171,7 +171,7 @@ export async function inviaPushChiamata(
     const body = `${nomeG1} vs ${nomeG2}${info_partita.biliardo ? ` — Biliardo ${info_partita.biliardo}` : ''}`;
 
     const data = {
-      type: 'chiamata_partita',
+      tipo: 'chiamata_partita',
       id_batteria_partita: String(info_partita.id_batteria_partita || ''),
       numero_chiamata: String(numeroChiamata),
       fase: info_partita.fase || '',
