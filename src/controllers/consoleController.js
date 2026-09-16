@@ -799,7 +799,7 @@ export const aggiornaChiamata = async (req, res) => {
         message: `${numeroChiamata}ª chiamata effettuata`,
         chiamata: nuovaChiamata
       });
-
+ } 
     // ============================================================
     // AZIONE: inizia
     // ============================================================
