@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../config/supabase.js';
+import { inviaPushChiamata } from '../services/firebaseService.js';
 
 // ============================================================
 // GET /api/console/gare
@@ -313,7 +314,7 @@ export const getBatterieTurno = async (req, res) => {
         codice: 'MISSING_PARAMS'
       });
     }
-    
+
     if (!idGara || !turno) {
       return res.status(400).json({
         success: false,
@@ -626,15 +627,27 @@ export const chiamaPartita = async (req, res) => {
       .update(updatePartita)
       .eq('id', id_batteria_partita);
 
+  // ============================================================
+    // PUSH FCM — Invia notifica ai 2 giocatori + arbitro
     // ============================================================
-    // TODO PRODUZIONE: Inviare push FCM a:
-    // - tesserato_1 (se ha device_token)
-    // - tesserato_2 (se ha device_token)
-    // - arbitro (se ha device_token)
-    // Per ora: stub
-    // ============================================================
-    // await inviaPushChiamata(partita, chiamata);
-
+    try {
+      await inviaPushChiamata(
+        partita.id_tesserato_1,
+        partita.id_tesserato_2,
+        id_arbitro || partita.id_arbitro,
+        {
+          id_batteria_partita,
+          numero_chiamata: 1,
+          fase: partita.fase,
+          posizione: partita.posizione,
+          biliardo: biliardo || null,
+          timer_minuti: timer_minuti || 10
+        }
+      );
+    } catch (pushError) {
+      // Non bloccare la risposta principale se la push fallisce
+      console.error('⚠️ Errore push (non bloccante):', pushError.message);
+    }
     res.status(201).json({
       success: true,
       message: 'Partita chiamata',

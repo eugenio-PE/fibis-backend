@@ -18,29 +18,49 @@ export const saveDeviceToken = async (req, res) => {
             return res.status(400).json({ error: 'device_os obbligatorio (android, ios, web)' });
         }
 
-        // 1. Recupera il tesserato associato all'utente
-        const { data: tesserato, error: tesseratoError } = await supabaseAdmin
+        // 1. Cerca PRIMA in tesserati
+        const { data: tesserato } = await supabaseAdmin
             .from('tesserati')
             .select('id')
             .eq('user_id', userId)
-            .single();
+            .maybeSingle();
 
-        if (tesseratoError || !tesserato) {
-            return res.status(404).json({ error: 'Tesserato non trovato per questo utente' });
+        // 2. Se non è tesserato, cerca in manutentori
+        let manutentore = null;
+        if (!tesserato) {
+            const { data: man } = await supabaseAdmin
+                .from('manutentori')
+                .select('id')
+                .eq('user_id', userId)
+                .maybeSingle();
+            manutentore = man;
         }
 
-        // 2. Salva o aggiorna il token
+        if (!tesserato && !manutentore) {
+            return res.status(404).json({ error: 'Utente non trovato né in tesserati né in manutentori' });
+        }
+
+        // 3. Prepara il record
+        const record = {
+            fcm_token: fcm_token,
+            device_os: device_os,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+        };
+
+        let onConflict;
+        if (tesserato) {
+            record.tesserato_id = tesserato.id;
+            onConflict = 'tesserato_id, fcm_token';
+        } else {
+            record.manutentore_id = manutentore.id;
+            onConflict = 'manutentore_id, fcm_token';
+        }
+
+        // 4. Upsert
         const { data, error } = await supabaseAdmin
             .from('device_tokens')
-            .upsert({
-                tesserato_id: tesserato.id,
-                fcm_token: fcm_token,
-                device_os: device_os,
-                is_active: true,
-                updated_at: new Date().toISOString(),
-            }, {
-                onConflict: 'tesserato_id, fcm_token'
-            })
+            .upsert(record, { onConflict })
             .select()
             .single();
 
@@ -49,7 +69,8 @@ export const saveDeviceToken = async (req, res) => {
             return res.status(500).json({ error: 'Errore salvataggio token' });
         }
 
-        console.log(`✅ Token FCM salvato per tesserato ${tesserato.id}: ${fcm_token.substring(0, 15)}...`);
+        const tipo = tesserato ? `tesserato ${tesserato.id}` : `manutentore ${manutentore.id}`;
+        console.log(`✅ Token FCM salvato per ${tipo}: ${fcm_token.substring(0, 15)}...`);
         res.json({ success: true, message: 'Token salvato con successo', data });
 
     } catch (error) {
