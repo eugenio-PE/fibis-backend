@@ -303,7 +303,17 @@ export const getDettaglioTurno = async (req, res) => {
 export const getBatterieTurno = async (req, res) => {
   try {
     const { idGara, turno } = req.params;
+    const { giorno } = req.query;  // ← NUOVO
 
+        // Controllo giorno
+    if (!giorno) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parametro giorno mancante',
+        codice: 'MISSING_PARAMS'
+      });
+    }
+    
     if (!idGara || !turno) {
       return res.status(400).json({
         success: false,
@@ -337,6 +347,7 @@ export const getBatterieTurno = async (req, res) => {
       `)
       .eq('id_gara', idGara)
       .eq('turno_value', turno)
+      .eq('giorno', giorno)
       .order('numero_batteria', { ascending: true })
       .order('fase', { ascending: true })
       .order('posizione', { ascending: true });
