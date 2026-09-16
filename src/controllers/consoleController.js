@@ -773,14 +773,32 @@ export const aggiornaChiamata = async (req, res) => {
 
       if (insertError) throw insertError;
 
-      // TODO PRODUZIONE: invia push anche per la 2ª/3ª chiamata
+      // ============================================================
+      // PUSH FCM — Invia notifica anche per 2ª/3ª chiamata
+      // ============================================================
+      try {
+        await inviaPushChiamata(
+          partita.id_tesserato_1,
+          partita.id_tesserato_2,
+          chiamata.id_arbitro,
+          {
+            id_batteria_partita: chiamata.id_batteria_partita,
+            numero_chiamata: numeroChiamata,
+            fase: partita.fase,
+            posizione: partita.posizione,
+            biliardo: chiamata.biliardo,
+            timer_minuti: chiamata.timer_minuti || 10
+          }
+        );
+      } catch (pushError) {
+        console.error('⚠️ Errore push 2ª/3ª chiamata (non bloccante):', pushError.message);
+      }
 
       return res.json({
         success: true,
         message: `${numeroChiamata}ª chiamata effettuata`,
         chiamata: nuovaChiamata
       });
-    }
 
     // ============================================================
     // AZIONE: inizia

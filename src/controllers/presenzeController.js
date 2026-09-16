@@ -362,3 +362,124 @@ export const getStatsGara = async (req, res) => {
     });
   }
 };
+// ============================================================
+// POST /api/presenze/forza
+// Forza il check-in di un tesserato (per casi eccezionali)
+// ============================================================
+// 
+// TODO PRODUZIONE: tracciare chi ha forzato (id_operatore)
+// e perché (note). Aggiungere audit log.
+// ============================================================
+
+export const forzaPresenza = async (req, res) => {
+  try {
+    const { id_tesserato, id_gara, note } = req.body;
+
+    // 1. Validazione
+    if (!id_tesserato || !id_gara) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_tesserato e id_gara obbligatori',
+        codice: 'MISSING_DATA'
+      });
+    }
+
+    // 2. Trova iscrizione
+    const { data: iscrizione, error: iscrizioneError } = await supabaseAdmin
+      .from('iscrizioni_gare')
+      .select('id, turno_value, giorno_iscrizione, eliminato')
+      .eq('id_gara', id_gara)
+      .eq('id_tesserato', id_tesserato)
+      .maybeSingle();
+
+    if (iscrizioneError) {
+      console.error('❌ Errore query iscrizione:', iscrizioneError);
+      throw iscrizioneError;
+    }
+
+    if (!iscrizione) {
+      return res.status(404).json({
+        success: false,
+        error: 'Tesserato non iscritto a questa gara',
+        codice: 'NOT_ENROLLED'
+      });
+    }
+
+    // 3. Verifica se già presente
+    const { data: presenzaEsistente } = await supabaseAdmin
+      .from('presenze_gare')
+      .select('id')
+      .eq('id_gara', id_gara)
+      .eq('id_tesserato', id_tesserato)
+      .eq('giorno', iscrizione.giorno_iscrizione)
+      .eq('turno_value', iscrizione.turno_value)
+      .maybeSingle();
+
+    if (presenzaEsistente) {
+      return res.status(409).json({
+        success: false,
+        error: 'Tesserato già presente',
+        codice: 'ALREADY_PRESENT'
+      });
+    }
+
+    // 4. Recupera operatore
+    let id_operatore = null;
+    if (req.userId) {
+      const { data: manutentore } = await supabaseAdmin
+        .from('manutentori')
+        .select('id')
+        .eq('user_id', req.userId)
+        .maybeSingle();
+      if (manutentore) id_operatore = manutentore.id;
+    }
+
+    // 5. Inserisci presenza forzata
+    const { data: presenza, error: insertError } = await supabaseAdmin
+      .from('presenze_gare')
+      .insert({
+        id_gara,
+        id_tesserato,
+        giorno: iscrizione.giorno_iscrizione,
+        turno_value: iscrizione.turno_value,
+        metodo: 'forzatura_luca',
+        id_operatore,
+        note: note || 'Presenza forzata da console'
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('❌ Errore insert presenza forzata:', insertError);
+      throw insertError;
+    }
+
+    // 6. Recupera dati tesserato
+    const { data: tesserato } = await supabaseAdmin
+      .from('tesserati')
+      .select('id, nome, cognome, matricola')
+      .eq('id', id_tesserato)
+      .single();
+
+    res.status(201).json({
+      success: true,
+      message: 'Presenza forzata registrata',
+      presenza: {
+        id: presenza.id,
+        id_tesserato: presenza.id_tesserato,
+        nome: tesserato?.nome,
+        cognome: tesserato?.cognome,
+        metodo: presenza.metodo,
+        data_scansione: presenza.data_scansione
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Errore forzaPresenza:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante la forzatura',
+      dettaglio: error.message
+    });
+  }
+};

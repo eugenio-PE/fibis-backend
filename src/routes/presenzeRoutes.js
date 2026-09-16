@@ -2,7 +2,8 @@ import express from 'express';
 import {
   checkIn,
   getPresenzeTurno,
-  getStatsGara
+  getStatsGara,
+  forzaPresenza
 } from '../controllers/presenzeController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
@@ -34,6 +35,14 @@ router.get(
   authenticate,
   requireRole(['admin', 'settore_tecnico']),
   getStatsGara
+);
+
+// POST: Forza check-in di un tesserato
+router.post(
+  '/forza',
+  authenticate,
+  requireRole(['admin', 'settore_tecnico']),
+  forzaPresenza
 );
 
 export default router;
