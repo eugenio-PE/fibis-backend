@@ -168,7 +168,9 @@ export async function inviaPushChiamata(
       info_partita.fase === 'finale' ? 'Finale' : info_partita.fase;
 
     const title = `📢 Chiamata #${numeroChiamata} — ${faseLabel}`;
-    const body = `${nomeG1} vs ${nomeG2}${info_partita.biliardo ? ` — Biliardo ${info_partita.biliardo}` : ''}`;
+    const biliardoText = info_partita.biliardo ? ` — Biliardo ${info_partita.biliardo}` : '';
+    const timerText = info_partita.timer_minuti ? ` — ⏱ ${info_partita.timer_minuti} min` : '';
+    const body = `${nomeG1} vs ${nomeG2}${biliardoText}${timerText}`;
 
     const data = {
       tipo: 'chiamata_partita',

@@ -594,6 +594,27 @@ export const chiamaPartita = async (req, res) => {
         codice: 'INVALID_STATE'
       });
     }
+        // 2b. Verifica se l'arbitro è già impegnato in un'altra partita
+    // (avviso, non blocco)
+    const arbitroScelto = id_arbitro || partita.id_arbitro;
+    let arbitroImpegnato = false;
+    let partiteArbitro = [];
+
+    if (arbitroScelto) {
+      const { data: partiteAttive } = await supabaseAdmin
+        .from('batterie_turno')
+        .select('id, fase, posizione, stato')
+        .eq('id_gara', partita.id_gara)
+        .eq('giorno', partita.giorno)
+        .eq('id_arbitro', arbitroScelto)
+        .in('stato', ['chiamata', 'in_corso'])
+        .neq('id', id_batteria_partita);  // escludi la partita corrente
+
+      if (partiteAttive && partiteAttive.length > 0) {
+        arbitroImpegnato = true;
+        partiteArbitro = partiteAttive;
+      }
+    }
 
     // 3. Verifica check-in (info, NON bloccante)
     const { data: presenze } = await supabaseAdmin
@@ -675,6 +696,8 @@ export const chiamaPartita = async (req, res) => {
       success: true,
       message: 'Partita chiamata',
       tutti_presenti: tuttiPresenti,
+      arbitro_impegnato: arbitroImpegnato,
+      partite_arbitro: partiteArbitro,
       chiamata: {
         id: chiamata.id,
         id_batteria_partita: chiamata.id_batteria_partita,
