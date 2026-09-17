@@ -1356,6 +1356,7 @@ const popolaFaseSuccessiva = async (
 export const getArbitriPerGara = async (req, res) => {
   try {
     const { idGara } = req.params;
+    const { giorno } = req.query;  // ← NUOVO
 
     if (!idGara) {
       return res.status(400).json({
@@ -1384,12 +1385,19 @@ export const getArbitriPerGara = async (req, res) => {
     }
 
     // 2. Recupera partite chiamate/in_corso della gara
-    const { data: partite, error: partiteError } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('batterie_turno')
       .select('id, numero_batteria, fase, posizione, id_arbitro, stato')
       .eq('id_gara', idGara)
       .in('stato', ['chiamata', 'in_corso'])
       .not('id_arbitro', 'is', null);
+
+    // Filtra per giorno (se passato)
+    if (giorno) {
+      query = query.eq('giorno', giorno);
+    }
+
+    const { data: partite, error: partiteError } = await query;
 
     if (partiteError) {
       console.error('❌ Errore query partite:', partiteError);
