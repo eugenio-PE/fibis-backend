@@ -1372,6 +1372,9 @@ export const getArbitriPerGara = async (req, res) => {
       .select(`
         id_manutentore,
         ruolo,
+        in_pausa,
+        pausa_inizio,
+        pausa_fine,
         manutentori:id_manutentore (
           id, nome, cognome, email
         )
@@ -1420,10 +1423,24 @@ export const getArbitriPerGara = async (req, res) => {
     });
 
     // 4. Combina
+    const now = new Date();
+
     const arbitri = (arbitriGara || []).map(a => {
       const partiteAssegnate = partitePerArbitro[a.id_manutentore] || [];
       const inCorso = partiteAssegnate.filter(p => p.stato === 'in_corso');
       const chiamate = partiteAssegnate.filter(p => p.stato === 'chiamata');
+
+      // Verifica se la pausa è scaduta
+      let inPausa = a.in_pausa === true;
+      let pausaFine = a.pausa_fine;
+      
+      if (inPausa && pausaFine) {
+        const pausaFineDate = new Date(pausaFine);
+        if (pausaFineDate <= now) {
+          // Pausa scaduta → l'arbitro è di nuovo disponibile
+          inPausa = false;
+        }
+      }
 
       return {
         id: a.id_manutentore,
@@ -1432,6 +1449,9 @@ export const getArbitriPerGara = async (req, res) => {
         email: a.manutentori?.email || '',
         ruolo: a.ruolo,
         impegnato: inCorso.length > 0,
+        in_pausa: inPausa,
+        pausa_inizio: a.pausa_inizio,
+        pausa_fine: a.pausa_fine,
         partite_assegnate: partiteAssegnate,
         ha_partite_chiamate: chiamate.length > 0
       };
@@ -1449,6 +1469,147 @@ export const getArbitriPerGara = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Errore durante il recupero degli arbitri',
+      dettaglio: error.message
+    });
+  }
+};
+// ============================================================
+// POST /api/console/arbitro/:idManutentore/pausa
+// Avvia una pausa per un arbitro
+// Body: { id_gara, durata_minuti }
+// ============================================================
+export const avviaPausa = async (req, res) => {
+  try {
+    const { idManutentore } = req.params;
+    const { id_gara, durata_minuti } = req.body;
+
+    if (!id_gara || !durata_minuti) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_gara e durata_minuti obbligatori',
+        codice: 'MISSING_DATA'
+      });
+    }
+
+    // Verifica che la durata sia tra 15 e 180 minuti
+    if (durata_minuti < 15 || durata_minuti > 180) {
+      return res.status(400).json({
+        success: false,
+        error: 'La durata deve essere tra 15 e 180 minuti',
+        codice: 'INVALID_DURATION'
+      });
+    }
+
+    // Calcola pausa_inizio e pausa_fine
+    const pausaInizio = new Date();
+    const pausaFine = new Date(pausaInizio.getTime() + durata_minuti * 60 * 1000);
+
+    const { data, error } = await supabaseAdmin
+      .from('arbitri_gara')
+      .update({
+        in_pausa: true,
+        pausa_inizio: pausaInizio.toISOString(),
+        pausa_fine: pausaFine.toISOString()
+      })
+      .eq('id_gara', id_gara)
+      .eq('id_manutentore', idManutentore)
+      .eq('attivo', true)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Errore avvio pausa:', error);
+      throw error;
+    }
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: 'Arbitro non trovato o non attivo',
+        codice: 'NOT_FOUND'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Pausa avviata',
+      pausa: {
+        id_manutentore: parseInt(idManutentore),
+        in_pausa: data.in_pausa,
+        pausa_inizio: data.pausa_inizio,
+        pausa_fine: data.pausa_fine,
+        durata_minuti
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Errore avviaPausa:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante l\'avvio della pausa',
+      dettaglio: error.message
+    });
+  }
+};
+
+// ============================================================
+// PUT /api/console/arbitro/:idManutentore/pausa/fine
+// Termina una pausa manualmente
+// Body: { id_gara }
+// ============================================================
+export const terminaPausa = async (req, res) => {
+  try {
+    const { idManutentore } = req.params;
+    const { id_gara } = req.body;
+
+    if (!id_gara) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_gara obbligatorio',
+        codice: 'MISSING_DATA'
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('arbitri_gara')
+      .update({
+        in_pausa: false,
+        pausa_inizio: null,
+        pausa_fine: null
+      })
+      .eq('id_gara', id_gara)
+      .eq('id_manutentore', idManutentore)
+      .eq('attivo', true)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Errore termine pausa:', error);
+      throw error;
+    }
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: 'Arbitro non trovato o non attivo',
+        codice: 'NOT_FOUND'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Pausa terminata',
+      arbitro: {
+        id_manutentore: parseInt(idManutentore),
+        in_pausa: false
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Errore terminaPausa:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante la fine della pausa',
       dettaglio: error.message
     });
   }

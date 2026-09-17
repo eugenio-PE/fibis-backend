@@ -4,14 +4,16 @@ import {
   getGiorni,
   getTurni,
   getDettaglioTurno,
-  getBatterieTurno,           // ← NUOVO
-  getArbitriPerGara,        // ← NUOVO
-  chiamaPartita,           // ← NUOVO
-  aggiornaChiamata,        // ← NUOVO
+  getBatterieTurno,
+  getArbitriPerGara,
+  chiamaPartita,
+  aggiornaChiamata,
   getArbitriDisponibili,
   getArbitriGara,
   assegnaArbitriGara,
-  rimuoviArbitroGara
+  rimuoviArbitroGara,
+  avviaPausa,
+  terminaPausa
 } from '../controllers/consoleController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
@@ -126,6 +128,25 @@ router.put(
   authenticate,
   requireRole(CONSOLE_ROLES),
   aggiornaChiamata
+);
+// ============================================================
+// ROTTE PAUSA ARBITRI
+// ============================================================
+
+// POST: Avvia pausa
+router.post(
+  '/arbitro/:idManutentore/pausa',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  avviaPausa
+);
+
+// PUT: Termina pausa
+router.put(
+  '/arbitro/:idManutentore/pausa/fine',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  terminaPausa
 );
 
 export default router;
