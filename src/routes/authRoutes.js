@@ -1,5 +1,5 @@
 import express from 'express';
-import { login, setupOTP, verifyOTPCode, getMe, verificaOTP } from '../controllers/authController.js';
+import { login, setupOTP, verifyOTPCode, getMe, verificaOTP, refresh } from '../controllers/authController.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -20,5 +20,6 @@ router.post('/verifica-otp', verificaOTP);
 router.get('/verify', authenticate, (req, res) => {
   res.json({ valid: true, user: req.user });
 });
-
+// POST: Rinnova access_token
+router.post('/refresh', refresh);
 export default router;

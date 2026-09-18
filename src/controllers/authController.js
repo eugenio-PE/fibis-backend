@@ -113,3 +113,34 @@ export const verificaOTP = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+// ============================================================
+// POST /api/auth/refresh
+// Rinnova l'access_token usando il refresh_token
+// ============================================================
+export const refresh = async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+      return res.status(400).json({ error: 'refresh_token obbligatorio' });
+    }
+
+    const { data, error } = await supabase.auth.refreshSession({
+      refresh_token
+    });
+
+    if (error || !data.session) {
+      console.error('❌ Errore refresh token:', error?.message);
+      return res.status(401).json({ error: 'Refresh token non valido' });
+    }
+
+    res.json({
+      token: data.session.access_token,
+      refresh_token: data.session.refresh_token
+    });
+
+  } catch (error) {
+    console.error('❌ Errore refresh:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
