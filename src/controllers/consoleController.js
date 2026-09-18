@@ -1356,7 +1356,7 @@ const popolaFaseSuccessiva = async (
 export const getArbitriPerGara = async (req, res) => {
   try {
     const { idGara } = req.params;
-    const { giorno } = req.query;  // ← NUOVO
+    const { giorno } = req.query;
 
     if (!idGara) {
       return res.status(400).json({
@@ -1366,8 +1366,11 @@ export const getArbitriPerGara = async (req, res) => {
       });
     }
 
+    // Dichiarato UNA VOLTA in cima, usato da tutti i blocchi sotto
+    const now = new Date();
+
     // 1. Recupera arbitri assegnati alla gara
-    const { data: arbitriGara, error: arbitriError } = await supabaseAdmin
+    let { data: arbitriGara, error: arbitriError } = await supabaseAdmin
       .from('arbitri_gara')
       .select(`
         id_manutentore,
@@ -1385,6 +1388,42 @@ export const getArbitriPerGara = async (req, res) => {
     if (arbitriError) {
       console.error('❌ Errore query arbitri gara:', arbitriError);
       throw arbitriError;
+    }
+
+    // ============================================================
+    // RESET AUTOMATICO PAUSE SCADUTE
+    // ============================================================
+    // Se un arbitro ha una pausa scaduta (pausa_fine <= now),
+    // resetta automaticamente in_pausa a false.
+    // ============================================================
+    const arbitriPauseScadute = (arbitriGara || [])
+      .filter(a => a.in_pausa && a.pausa_fine && new Date(a.pausa_fine) <= now)
+      .map(a => a.id_manutentore);
+
+    if (arbitriPauseScadute.length > 0) {
+      await supabaseAdmin
+        .from('arbitri_gara')
+        .update({ in_pausa: false, pausa_inizio: null, pausa_fine: null })
+        .eq('id_gara', idGara)
+        .in('id_manutentore', arbitriPauseScadute);
+
+      // Ricarica arbitri gara aggiornati
+      const { data: arbitriAggiornati } = await supabaseAdmin
+        .from('arbitri_gara')
+        .select(`
+          id_manutentore,
+          ruolo,
+          in_pausa,
+          pausa_inizio,
+          pausa_fine,
+          manutentori:id_manutentore (
+            id, nome, cognome, email
+          )
+        `)
+        .eq('id_gara', idGara)
+        .eq('attivo', true);
+
+      arbitriGara = arbitriAggiornati || arbitriGara;
     }
 
     // 2. Recupera partite chiamate/in_corso della gara
@@ -1423,8 +1462,6 @@ export const getArbitriPerGara = async (req, res) => {
     });
 
     // 4. Combina
-    const now = new Date();
-
     const arbitri = (arbitriGara || []).map(a => {
       const partiteAssegnate = partitePerArbitro[a.id_manutentore] || [];
       const inCorso = partiteAssegnate.filter(p => p.stato === 'in_corso');
@@ -1433,7 +1470,7 @@ export const getArbitriPerGara = async (req, res) => {
       // Verifica se la pausa è scaduta
       let inPausa = a.in_pausa === true;
       let pausaFine = a.pausa_fine;
-      
+
       if (inPausa && pausaFine) {
         const pausaFineDate = new Date(pausaFine);
         if (pausaFineDate <= now) {
