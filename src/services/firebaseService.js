@@ -209,3 +209,88 @@ export async function inviaPushChiamata(
     return { inviati: 0, totale: 0, errore: error.message };
   }
 }
+// ============================================================
+// INVIA PUSH SOSTITUZIONE ARBITRO
+// ============================================================
+// Notifica il nuovo arbitro (e il vecchio) della sostituzione.
+// ============================================================
+export async function inviaPushSostituzione(
+  idArbitroNuovo,
+  idArbitroVecchio,
+  infoPartita
+) {
+  try {
+    const { supabaseAdmin } = await import('../config/supabase.js');
+
+    // 1. Recupera device_token del nuovo arbitro
+    const { data: tokensNuovo } = await supabaseAdmin
+      .from('device_tokens')
+      .select('fcm_token')
+      .eq('manutentore_id', idArbitroNuovo)
+      .eq('is_active', true);
+
+    // 2. Recupera device_token del vecchio arbitro
+    const { data: tokensVecchio } = await supabaseAdmin
+      .from('device_tokens')
+      .select('fcm_token')
+      .eq('manutentore_id', idArbitroVecchio)
+      .eq('is_active', true);
+
+    // 3. Recupera nomi giocatori
+    const { data: tesserati } = await supabaseAdmin
+      .from('tesserati')
+      .select('id, nome, cognome')
+      .in('id', [infoPartita.id_tesserato_1, infoPartita.id_tesserato_2].filter(Boolean));
+
+    const nomeG1 = tesserati?.find(t => t.id === infoPartita.id_tesserato_1);
+    const nomeG2 = tesserati?.find(t => t.id === infoPartita.id_tesserato_2);
+    const partitaLabel = `${nomeG1?.cognome || ''} ${nomeG1?.nome || ''} vs ${nomeG2?.cognome || ''} ${nomeG2?.nome || ''}`;
+    const faseLabel = infoPartita.fase === 'quarti' ? 'Quarti' :
+                      infoPartita.fase === 'semifinale' ? 'Semifinale' :
+                      infoPartita.fase === 'finale' ? 'Finale' : infoPartita.fase;
+
+    // 4. Push al nuovo arbitro
+    if (tokensNuovo && tokensNuovo.length > 0) {
+      const title = `🔄 Sei stato assegnato a ${faseLabel} ${infoPartita.posizione}`;
+      const body = partitaLabel;
+      const data = {
+        tipo: 'sostituzione_arbitro',
+        id_batteria_partita: String(infoPartita.id_batteria_partita || ''),
+        fase: infoPartita.fase || '',
+        posizione: String(infoPartita.posizione || '')
+      };
+
+      await sendPushNotificationMultiple(
+        tokensNuovo.map(t => t.fcm_token),
+        title,
+        body,
+        data
+      );
+    }
+
+    // 5. Push al vecchio arbitro
+    if (tokensVecchio && tokensVecchio.length > 0) {
+      const title = `⚠️ Sei stato sostituito da ${faseLabel} ${infoPartita.posizione}`;
+      const body = partitaLabel;
+      const data = {
+        tipo: 'sostituzione_arbitro_vecchio',
+        id_batteria_partita: String(infoPartita.id_batteria_partita || ''),
+        fase: infoPartita.fase || '',
+        posizione: String(infoPartita.posizione || '')
+      };
+
+      await sendPushNotificationMultiple(
+        tokensVecchio.map(t => t.fcm_token),
+        title,
+        body,
+        data
+      );
+    }
+
+    return { inviati: true };
+
+  } catch (error) {
+    console.error('❌ Errore inviaPushSostituzione:', error);
+    return { inviati: false, errore: error.message };
+  }
+}

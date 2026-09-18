@@ -1651,3 +1651,132 @@ export const terminaPausa = async (req, res) => {
     });
   }
 };
+// ============================================================
+// PUT /api/console/partita/:id/sostituisci-arbitro
+// Sostituisce l'arbitro di una partita (chiamata o in_corso)
+// Body: { id_arbitro_nuovo }
+// ============================================================
+export const sostituisciArbitro = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id_arbitro_nuovo } = req.body;
+
+    if (!id_arbitro_nuovo) {
+      return res.status(400).json({
+        success: false,
+        error: 'id_arbitro_nuovo obbligatorio',
+        codice: 'MISSING_DATA'
+      });
+    }
+
+    // 1. Recupera la partita
+    const { data: partita, error: partitaError } = await supabaseAdmin
+      .from('batterie_turno')
+      .select(`
+        id, id_gara, giorno, turno_value, numero_batteria, fase, posizione,
+        id_tesserato_1, id_tesserato_2, id_arbitro, stato
+      `)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (partitaError) {
+      console.error('❌ Errore query partita:', partitaError);
+      throw partitaError;
+    }
+
+    if (!partita) {
+      return res.status(404).json({
+        success: false,
+        error: 'Partita non trovata',
+        codice: 'NOT_FOUND'
+      });
+    }
+
+    // 2. Verifica che la partita sia 'chiamata' o 'in_corso'
+    if (partita.stato !== 'chiamata' && partita.stato !== 'in_corso') {
+      return res.status(422).json({
+        success: false,
+        error: `Non puoi sostituire l'arbitro di una partita in stato "${partita.stato}"`,
+        codice: 'INVALID_STATE'
+      });
+    }
+
+    const vecchioArbitro = partita.id_arbitro;
+
+    if (vecchioArbitro === id_arbitro_nuovo) {
+      return res.status(400).json({
+        success: false,
+        error: 'Il nuovo arbitro è già quello assegnato',
+        codice: 'SAME_ARBITRO'
+      });
+    }
+
+    // 3. Verifica che il nuovo arbitro sia assegnato alla gara
+    const { data: arbitroAssegnato, error: arbError } = await supabaseAdmin
+      .from('arbitri_gara')
+      .select('id_manutentore, in_pausa')
+      .eq('id_gara', partita.id_gara)
+      .eq('id_manutentore', id_arbitro_nuovo)
+      .eq('attivo', true)
+      .maybeSingle();
+
+    if (arbError) {
+      console.error('❌ Errore query arbitro:', arbError);
+      throw arbError;
+    }
+
+    if (!arbitroAssegnato) {
+      return res.status(404).json({
+        success: false,
+        error: 'Nuovo arbitro non assegnato alla gara',
+        codice: 'NOT_FOUND'
+      });
+    }
+
+    // 4. Aggiorna battuta_turno
+    await supabaseAdmin
+      .from('batterie_turno')
+      .update({ id_arbitro: id_arbitro_nuovo })
+      .eq('id', id);
+
+    // 5. Aggiorna l'ultima chiamata attiva
+    await supabaseAdmin
+      .from('chiamate_partite')
+      .update({ id_arbitro: id_arbitro_nuovo })
+      .eq('id_batteria_partita', id)
+      .in('esito', ['in_attesa', 'in_corso']);
+
+    // 6. PUSH al nuovo arbitro
+    try {
+      const { inviaPushSostituzione } = await import('../services/firebaseService.js');
+      await inviaPushSostituzione(
+        id_arbitro_nuovo,
+        vecchioArbitro,
+        {
+          id_batteria_partita: partita.id,
+          fase: partita.fase,
+          posizione: partita.posizione,
+          id_tesserato_1: partita.id_tesserato_1,
+          id_tesserato_2: partita.id_tesserato_2
+        }
+      );
+    } catch (pushError) {
+      console.error('⚠️ Errore push sostituzione (non bloccante):', pushError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Arbitro sostituito',
+      id_arbitro_vecchio: vecchioArbitro,
+      id_arbitro_nuovo
+    });
+
+  } catch (error) {
+    console.error('❌ Errore sostituisciArbitro:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Errore durante la sostituzione',
+      dettaglio: error.message
+    });
+  }
+};

@@ -13,7 +13,8 @@ import {
   assegnaArbitriGara,
   rimuoviArbitroGara,
   avviaPausa,
-  terminaPausa
+  terminaPausa,
+  sostituisciArbitro
 } from '../controllers/consoleController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
@@ -147,6 +148,13 @@ router.put(
   authenticate,
   requireRole(CONSOLE_ROLES),
   terminaPausa
+);
+// PUT: Sostituisci arbitro di una partita
+router.put(
+  '/partita/:id/sostituisci-arbitro',
+  authenticate,
+  requireRole(CONSOLE_ROLES),
+  sostituisciArbitro
 );
 
 export default router;
