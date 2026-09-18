@@ -1653,7 +1653,7 @@ export const terminaPausa = async (req, res) => {
 };
 // ============================================================
 // PUT /api/console/partita/:id/sostituisci-arbitro
-// Sostituisce l'arbitro di una partita (chiamata o in_corso)
+// Sostituisce l'arbitro di una partita (attesa, chiamata o in_corso)
 // Body: { id_arbitro_nuovo }
 // ============================================================
 export const sostituisciArbitro = async (req, res) => {
@@ -1692,8 +1692,9 @@ export const sostituisciArbitro = async (req, res) => {
       });
     }
 
-    // 2. Verifica che la partita sia 'chiamata' o 'in_corso'
-    if (partita.stato !== 'chiamata' && partita.stato !== 'in_corso') {
+    // 2. Verifica che la partita sia 'attesa', 'chiamata' o 'in_corso'
+    // (il direttore può sempre sostituire l'arbitro su partite attive)
+    if (partita.stato !== 'attesa' && partita.stato !== 'chiamata' && partita.stato !== 'in_corso') {
       return res.status(422).json({
         success: false,
         error: `Non puoi sostituire l'arbitro di una partita in stato "${partita.stato}"`,
