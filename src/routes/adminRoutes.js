@@ -619,9 +619,33 @@ router.post('/admin/asd/:id/genera-qr', authenticate, requireRole(['admin']), as
 
 router.get('/asd/:qrCode', scanQR);
 
-// ============================================
+
 // ROTTE PER BILIARDI
 // ============================================
+
+// GET: Lista biliardi di una ASD (o tutti)
+router.get('/admin/biliardi', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const { asd_id } = req.query;
+
+    let query = supabaseAdmin
+      .from('biliardi')
+      .select('*')
+      .order('nome_tavolo', { ascending: true });
+
+    if (asd_id) {
+      query = query.eq('id_asd', asd_id);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore GET biliardi:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // POST: Aggiungi biliardo
 router.post('/admin/biliardi', authenticate, requireRole(['admin']), async (req, res) => {
