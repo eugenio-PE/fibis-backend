@@ -177,29 +177,158 @@ router.get('/interventi/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
-// VALIDA INTERVENTO
+// VALIDA INTERVENTO (federazione)
 // ============================================
-
 router.put('/interventi/:id/valida', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    const { omologato = true, note = null } = req.body;
     console.log(`🔵 PUT /interventi/${id}/valida - Inizio`);
-    
-    const { data, error } = await supabase
+
+    // 1. Recupera id_manutentore (admin) dall'utente loggato
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (adminError || !admin) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    // 2. Recupera intervento (per id_biliardo)
+    const { data: intervento, error: intError } = await supabaseAdmin
       .from('interventi')
-      .update({ stato: 'validato' })
+      .select('id, id_biliardo')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (intError || !intervento) {
+      return res.status(404).json({ error: 'Intervento non trovato' });
+    }
+
+    // 3. Aggiorna intervento
+    const { data, error } = await supabaseAdmin
+      .from('interventi')
+      .update({ 
+        stato: 'validato',
+        validato_da: admin.id,
+        data_validazione: new Date().toISOString()
+      })
       .eq('id', id)
       .select()
       .single();
 
-    if (error) {
-      console.log('❌ Errore Supabase:', error);
-      throw error;
+    if (error) throw error;
+
+    // 4. Salva in verifiche_federazione
+    await supabaseAdmin
+      .from('verifiche_federazione')
+      .insert({
+        id_intervento: parseInt(id),
+        id_biliardo: intervento.id_biliardo,
+        id_admin: admin.id,
+        esito: 'conforme',
+        omologato: omologato,
+        note: note
+      });
+
+    // 5. Se omologato → aggiorna biliardo
+    if (omologato) {
+      await supabaseAdmin
+        .from('biliardi')
+        .update({
+          omologato: true,
+          data_omologazione: new Date().toISOString().split('T')[0],
+          omologato_da: admin.id,
+          omologato_note: note
+        })
+        .eq('id', intervento.id_biliardo);
     }
-    console.log('✅ Intervento validato');
+
+    console.log('✅ Intervento validato + verifiche_federazione + biliardo aggiornato');
     res.json(data);
   } catch (error) {
-    console.log('❌ Errore generale:', error);
+    console.error('❌ Errore valida intervento:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// CONTESTA INTERVENTO (federazione)
+// ============================================
+router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { motivo } = req.body;
+    console.log(`🔵 PUT /interventi/${id}/contesta - Inizio`);
+
+    if (!motivo) {
+      return res.status(400).json({ error: 'Motivo obbligatorio' });
+    }
+
+    // 1. Recupera id_manutentore (admin)
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (adminError || !admin) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    // 2. Recupera intervento
+    const { data: intervento, error: intError } = await supabaseAdmin
+      .from('interventi')
+      .select('id, id_biliardo')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (intError || !intervento) {
+      return res.status(404).json({ error: 'Intervento non trovato' });
+    }
+
+    // 3. Aggiorna intervento
+    const { data, error } = await supabaseAdmin
+      .from('interventi')
+      .update({ 
+        stato: 'contestato',
+        validato_da: admin.id,
+        data_validazione: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // 4. Salva in verifiche_federazione
+    await supabaseAdmin
+      .from('verifiche_federazione')
+      .insert({
+        id_intervento: parseInt(id),
+        id_biliardo: intervento.id_biliardo,
+        id_admin: admin.id,
+        esito: 'non_conforme',
+        omologato: false,
+        note: motivo
+      });
+
+    // 5. NON omologare il biliardo (o rimuovi omologazione)
+    await supabaseAdmin
+      .from('biliardi')
+      .update({
+        omologato: false,
+        omologato_da: admin.id,
+        omologato_note: motivo
+      })
+      .eq('id', intervento.id_biliardo);
+
+    console.log('✅ Intervento contestato + verifiche_federazione + biliardo non omologato');
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Errore contesta intervento:', error);
     res.status(500).json({ error: error.message });
   }
 });
