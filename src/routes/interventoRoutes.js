@@ -122,6 +122,180 @@ router.get('/interventi', authenticate, async (req, res) => {
   }
 });
 // ============================================
+// LISTA ASD CON RIEPILOGO INTERVENTI (Livello 1)
+// ============================================
+router.get('/interventi/raggruppati-asd', authenticate, async (req, res) => {
+  try {
+    console.log('🔵 GET /interventi/raggruppati-asd');
+
+    // 1. Recupera tutti gli interventi con ASD
+    const { data: interventi, error } = await supabaseAdmin
+      .from('interventi')
+      .select(`
+        id,
+        stato,
+        biliardi!interventi_id_biliardo_fkey (
+          id,
+          id_asd,
+          asd_centri!biliardi_id_asd_fkey (
+            id,
+            nome
+          )
+        )
+      `);
+
+    if (error) throw error;
+
+    // 2. Raggruppa per ASD
+    const asdMap = {};
+
+    (interventi || []).forEach(i => {
+      const asd = i.biliardi?.asd_centri;
+      const idAsd = asd?.id;
+      if (!idAsd) return;
+
+      if (!asdMap[idAsd]) {
+        asdMap[idAsd] = {
+          id_asd: idAsd,
+          nome: asd.nome,
+          biliardi_ids: new Set(),
+          n_interventi: 0,
+          n_da_validare: 0,
+          n_validati: 0,
+          n_contestati: 0
+        };
+      }
+
+      const a = asdMap[idAsd];
+      if (i.biliardi?.id) a.biliardi_ids.add(i.biliardi.id);
+      a.n_interventi++;
+      if (i.stato === 'registrato') a.n_da_validare++;
+      else if (i.stato === 'validato') a.n_validati++;
+      else if (i.stato === 'contestato') a.n_contestati++;
+    });
+
+    // 3. Converti in array
+    const asdArray = Object.values(asdMap).map(a => ({
+      id_asd: a.id_asd,
+      nome: a.nome,
+      n_biliardi: a.biliardi_ids.size,
+      n_interventi: a.n_interventi,
+      n_da_validare: a.n_da_validare,
+      n_validati: a.n_validati,
+      n_contestati: a.n_contestati
+    })).sort((a, b) => a.nome.localeCompare(b.nome));
+
+    res.json({
+      success: true,
+      totale: asdArray.length,
+      asd: asdArray
+    });
+
+  } catch (error) {
+    console.error('❌ Errore raggruppati-asd:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// BILIARDI + GRUPPI INTERVENTI DI UN'ASD (Livello 2)
+// ============================================
+router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) => {
+  try {
+    const { idAsd } = req.params;
+    console.log(`🔵 GET /interventi/asd/${idAsd}/raggruppati`);
+
+    // 1. Recupera biliardi dell'ASD
+    const { data: biliardi, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, tipo, dimensioni')
+      .eq('id_asd', idAsd)
+      .eq('attivo', true)
+      .order('nome_tavolo', { ascending: true });
+
+    if (bError) throw bError;
+
+    if (!biliardi || biliardi.length === 0) {
+      return res.json({ success: true, id_asd: parseInt(idAsd), biliardi: [] });
+    }
+
+    const idsBiliardi = biliardi.map(b => b.id);
+
+    // 2. Recupera interventi di quei biliardi
+    const { data: interventi, error: iError } = await supabaseAdmin
+      .from('interventi')
+      .select(`
+        id,
+        id_biliardo,
+        tipo_intervento,
+        stato,
+        data_intervento,
+        id_manutentore,
+        numero_lotto_dichiarato,
+        manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
+        prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
+      `)
+      .in('id_biliardo', idsBiliardi)
+      .order('data_intervento', { ascending: false });
+
+    if (iError) throw iError;
+
+    // 3. Raggruppa per biliardo + data + manutentore
+    const biliardiConGruppi = biliardi.map(b => {
+      const intBiliardo = (interventi || []).filter(i => i.id_biliardo === b.id);
+
+      // Raggruppa
+      const gruppiMap = {};
+      intBiliardo.forEach(i => {
+        const chiave = `${b.id}_${i.data_intervento}_${i.id_manutentore}`;
+        if (!gruppiMap[chiave]) {
+          gruppiMap[chiave] = {
+            chiave,
+            data_intervento: i.data_intervento,
+            id_manutentore: i.id_manutentore,
+            manutentore_nome: i.manutentori ? `${i.manutentori.nome} ${i.manutentori.cognome}` : 'N/A',
+            tipi: [],
+            stato: null,
+            id_interventi: [],
+            interventi: []
+          };
+        }
+        const g = gruppiMap[chiave];
+        g.tipi.push(i.tipo_intervento);
+        g.id_interventi.push(i.id);
+        g.interventi.push(i);
+      });
+
+      // Calcola stato aggregato
+      Object.values(gruppiMap).forEach(g => {
+        const stati = g.interventi.map(i => i.stato);
+        const tuttiUguali = stati.every(s => s === stati[0]);
+        g.stato = tuttiUguali ? stati[0] : 'misto';
+      });
+
+      return {
+        id_biliardo: b.id,
+        nome_tavolo: b.nome_tavolo,
+        tipo: b.tipo,
+        dimensioni: b.dimensioni,
+        gruppi: Object.values(gruppiMap).sort((a, b) => 
+          new Date(b.data_intervento) - new Date(a.data_intervento)
+        )
+      };
+    });
+
+    res.json({
+      success: true,
+      id_asd: parseInt(idAsd),
+      biliardi: biliardiConGruppi
+    });
+
+  } catch (error) {
+    console.error('❌ Errore raggruppati ASD:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// ============================================
 // VALIDA GRUPPO DI INTERVENTI (federazione)
 // Body: { id_interventi: [1, 2, 3], omologato, note }
 // ============================================
