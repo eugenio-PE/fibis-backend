@@ -223,18 +223,23 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
 
     // 2. Recupera interventi di quei biliardi
     const { data: interventi, error: iError } = await supabaseAdmin
-      .from('interventi')
-      .select(`
-        id,
-        id_biliardo,
-        tipo_intervento,
-        stato,
-        data_intervento,
-        id_manutentore,
-        numero_lotto_dichiarato,
-        manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
-        prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
-      `)
+    .select(`
+  id,
+  id_biliardo,
+  tipo_intervento,
+  stato,
+  data_intervento,
+  id_manutentore,
+  numero_lotto_dichiarato,
+  note,
+  data_validazione,
+  validato_da,
+  foto_confezione,
+  foto_marchio,
+  foto_biliardo,
+  manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
+  prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
+`)
       .in('id_biliardo', idsBiliardi)
       .order('data_intervento', { ascending: false });
 
