@@ -121,7 +121,196 @@ router.get('/interventi', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ============================================
+// VALIDA GRUPPO DI INTERVENTI (federazione)
+// Body: { id_interventi: [1, 2, 3], omologato, note }
+// ============================================
+router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
+  try {
+    const { id_interventi, omologato = true, note = null } = req.body;
 
+    if (!Array.isArray(id_interventi) || id_interventi.length === 0) {
+      return res.status(400).json({ error: 'id_interventi mancante o vuoto' });
+    }
+
+    console.log(`🔵 PUT /interventi/valida-gruppo - ${id_interventi.length} interventi`);
+
+    // 1. Recupera id_manutentore (admin)
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (adminError || !admin) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    // 2. Recupera tutti gli interventi (per id_biliardo)
+    const { data: interventi, error: intError } = await supabaseAdmin
+      .from('interventi')
+      .select('id, id_biliardo')
+      .in('id', id_interventi);
+
+    if (intError || !interventi || interventi.length === 0) {
+      return res.status(404).json({ error: 'Interventi non trovati' });
+    }
+
+    // 3. Aggiorna tutti gli interventi
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('interventi')
+      .update({
+        stato: 'validato',
+        validato_da: admin.id,
+        data_validazione: new Date().toISOString()
+      })
+      .in('id', id_interventi)
+      .select();
+
+    if (updateError) throw updateError;
+
+    // 4. Salva in verifiche_federazione (1 record per intervento)
+    const verificheRecords = interventi.map(i => ({
+      id_intervento: i.id,
+      id_biliardo: i.id_biliardo,
+      id_admin: admin.id,
+      esito: 'conforme',
+      omologato: omologato,
+      note: note
+    }));
+
+    const { error: verError } = await supabaseAdmin
+      .from('verifiche_federazione')
+      .insert(verificheRecords);
+
+    if (verError) throw verError;
+
+    // 5. Se omologato → aggiorna i biliardi coinvolti
+    if (omologato) {
+      const idBiliardi = [...new Set(interventi.map(i => i.id_biliardo))];
+      
+      for (const idBiliardo of idBiliardi) {
+        await supabaseAdmin
+          .from('biliardi')
+          .update({
+            omologato: true,
+            data_omologazione: new Date().toISOString().split('T')[0],
+            omologato_da: admin.id,
+            omologato_note: note
+          })
+          .eq('id', idBiliardo);
+      }
+    }
+
+    console.log(`✅ ${updated.length} interventi validati + ${verificheRecords.length} verifiche_federazione`);
+    
+    res.json({
+      success: true,
+      message: `${updated.length} interventi validati`,
+      interventi: updated
+    });
+
+  } catch (error) {
+    console.error('❌ Errore valida-gruppo:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// CONTESTA GRUPPO DI INTERVENTI (federazione)
+// Body: { id_interventi: [1, 2, 3], motivo }
+// ============================================
+router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
+  try {
+    const { id_interventi, motivo } = req.body;
+
+    if (!Array.isArray(id_interventi) || id_interventi.length === 0) {
+      return res.status(400).json({ error: 'id_interventi mancante o vuoto' });
+    }
+
+    if (!motivo) {
+      return res.status(400).json({ error: 'Motivo obbligatorio' });
+    }
+
+    console.log(`🔵 PUT /interventi/contesta-gruppo - ${id_interventi.length} interventi`);
+
+    // 1. Recupera id_manutentore (admin)
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (adminError || !admin) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    // 2. Recupera tutti gli interventi
+    const { data: interventi, error: intError } = await supabaseAdmin
+      .from('interventi')
+      .select('id, id_biliardo')
+      .in('id', id_interventi);
+
+    if (intError || !interventi || interventi.length === 0) {
+      return res.status(404).json({ error: 'Interventi non trovati' });
+    }
+
+    // 3. Aggiorna tutti gli interventi
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('interventi')
+      .update({
+        stato: 'contestato',
+        validato_da: admin.id,
+        data_validazione: new Date().toISOString()
+      })
+      .in('id', id_interventi)
+      .select();
+
+    if (updateError) throw updateError;
+
+    // 4. Salva in verifiche_federazione
+    const verificheRecords = interventi.map(i => ({
+      id_intervento: i.id,
+      id_biliardo: i.id_biliardo,
+      id_admin: admin.id,
+      esito: 'non_conforme',
+      omologato: false,
+      note: motivo
+    }));
+
+    const { error: verError } = await supabaseAdmin
+      .from('verifiche_federazione')
+      .insert(verificheRecords);
+
+    if (verError) throw verError;
+
+    // 5. Rimuovi omologazione dai biliardi coinvolti
+    const idBiliardi = [...new Set(interventi.map(i => i.id_biliardo))];
+    
+    for (const idBiliardo of idBiliardi) {
+      await supabaseAdmin
+        .from('biliardi')
+        .update({
+          omologato: false,
+          omologato_da: admin.id,
+          omologato_note: motivo
+        })
+        .eq('id', idBiliardo);
+    }
+
+    console.log(`✅ ${updated.length} interventi contestati + ${verificheRecords.length} verifiche_federazione`);
+    
+    res.json({
+      success: true,
+      message: `${updated.length} interventi contestati`,
+      interventi: updated
+    });
+
+  } catch (error) {
+    console.error('❌ Errore contesta-gruppo:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 // ============================================
 // DETTAGLIO INTERVENTO
 // ============================================
