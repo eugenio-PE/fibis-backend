@@ -76,7 +76,6 @@ router.get('/interventi', authenticate, async (req, res) => {
     console.log('🔵 GET /interventi - Inizio');
     const { asdId } = req.query;
     
-    // Costruisci la query base
     let query = supabaseAdmin
       .from('interventi')
       .select(`
@@ -93,10 +92,8 @@ router.get('/interventi', authenticate, async (req, res) => {
         )
       `);
     
-    // Se asdId è fornito e non è 'tutte', filtra per ASD
     if (asdId && asdId !== 'tutte') {
       console.log(`🔵 Filtro per ASD ID: ${asdId}`);
-      // Filtra gli interventi basati sull'ASD attraverso la relazione biliardi
       query = query.eq('biliardi.asd_centri.id', parseInt(asdId));
     }
     
@@ -121,6 +118,7 @@ router.get('/interventi', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // ============================================
 // LISTA ASD CON RIEPILOGO INTERVENTI (Livello 1)
 // ============================================
@@ -128,7 +126,6 @@ router.get('/interventi/raggruppati-asd', authenticate, async (req, res) => {
   try {
     console.log('🔵 GET /interventi/raggruppati-asd');
 
-    // 1. Recupera tutti gli interventi con ASD
     const { data: interventi, error } = await supabaseAdmin
       .from('interventi')
       .select(`
@@ -146,7 +143,6 @@ router.get('/interventi/raggruppati-asd', authenticate, async (req, res) => {
 
     if (error) throw error;
 
-    // 2. Raggruppa per ASD
     const asdMap = {};
 
     (interventi || []).forEach(i => {
@@ -174,7 +170,6 @@ router.get('/interventi/raggruppati-asd', authenticate, async (req, res) => {
       else if (i.stato === 'contestato') a.n_contestati++;
     });
 
-    // 3. Converti in array
     const asdArray = Object.values(asdMap).map(a => ({
       id_asd: a.id_asd,
       nome: a.nome,
@@ -205,52 +200,62 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
     const { idAsd } = req.params;
     console.log(`🔵 GET /interventi/asd/${idAsd}/raggruppati`);
 
-    // 1. Recupera biliardi dell'ASD
+    // 1. Recupera biliardi dell'ASD (con omologato + esente)
     const { data: biliardi, error: bError } = await supabaseAdmin
       .from('biliardi')
-      .select('id, nome_tavolo, tipo, dimensioni')
+      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente')
       .eq('id_asd', idAsd)
       .eq('attivo', true)
-      .order('nome_tavolo', { ascending: true });
+      .order('id', { ascending: true });
 
     if (bError) throw bError;
 
     if (!biliardi || biliardi.length === 0) {
-      return res.json({ success: true, id_asd: parseInt(idAsd), biliardi: [] });
+      return res.json({ 
+        success: true, 
+        id_asd: parseInt(idAsd), 
+        biliardi: [],
+        esenzione: {
+          num_tesserati: 0,
+          max_esenti: 0,
+          biliardi_esenti: 0,
+          biliardi_totali: 0,
+          biliardi_omologati: 0
+        }
+      });
     }
 
     const idsBiliardi = biliardi.map(b => b.id);
 
     // 2. Recupera interventi di quei biliardi
-// 2. Recupera interventi di quei biliardi
-const { data: interventi, error: iError } = await supabaseAdmin
-  .from('interventi')
-  .select(`
-    id,
-    id_biliardo,
-    tipo_intervento,
-    stato,
-    data_intervento,
-    id_manutentore,
-    numero_lotto_dichiarato,
-    note,
-    data_validazione,
-    validato_da,
-    foto_confezione,
-    foto_marchio,
-    foto_biliardo,
-    manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
-    prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
-  `)
-  .in('id_biliardo', idsBiliardi)
-  .order('data_intervento', { ascending: false });
+    const { data: interventi, error: iError } = await supabaseAdmin
+      .from('interventi')
+      .select(`
+        id,
+        id_biliardo,
+        tipo_intervento,
+        stato,
+        data_intervento,
+        id_manutentore,
+        numero_lotto_dichiarato,
+        note,
+        data_validazione,
+        validato_da,
+        foto_confezione,
+        foto_marchio,
+        foto_biliardo,
+        manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
+        prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
+      `)
+      .in('id_biliardo', idsBiliardi)
+      .order('data_intervento', { ascending: false });
+
     if (iError) throw iError;
 
     // 3. Raggruppa per biliardo + data + manutentore
     const biliardiConGruppi = biliardi.map(b => {
       const intBiliardo = (interventi || []).filter(i => i.id_biliardo === b.id);
 
-      // Raggruppa
       const gruppiMap = {};
       intBiliardo.forEach(i => {
         const chiave = `${b.id}_${i.data_intervento}_${i.id_manutentore}`;
@@ -272,7 +277,6 @@ const { data: interventi, error: iError } = await supabaseAdmin
         g.interventi.push(i);
       });
 
-      // Calcola stato aggregato
       Object.values(gruppiMap).forEach(g => {
         const stati = g.interventi.map(i => i.stato);
         const tuttiUguali = stati.every(s => s === stati[0]);
@@ -284,16 +288,40 @@ const { data: interventi, error: iError } = await supabaseAdmin
         nome_tavolo: b.nome_tavolo,
         tipo: b.tipo,
         dimensioni: b.dimensioni,
+        omologato: b.omologato === true,
+        esente: b.esente === true,
         gruppi: Object.values(gruppiMap).sort((a, b) => 
           new Date(b.data_intervento) - new Date(a.data_intervento)
         )
       };
     });
 
+    // 4. Calcola esenzione per includerla nella response
+    const { data: tesseratiData } = await supabaseAdmin
+      .from('tesserati')
+      .select('codice_fiscale')
+      .eq('asd_id', idAsd)
+      .eq('stato', 'attivo')
+      .in('categoria', ['Ordinaria', 'Pre-Agonistica'])
+      .not('codice_fiscale', 'is', null);
+
+    const cfUnici = new Set((tesseratiData || []).map(t => t.codice_fiscale));
+    const numTesserati = cfUnici.size;
+    const maxEsenti = Math.floor(numTesserati * 0.15);
+    const biliardiEsentiCount = biliardiConGruppi.filter(b => b.esente === true).length;
+    const biliardiOmologatiCount = biliardiConGruppi.filter(b => b.omologato === true).length;
+
     res.json({
       success: true,
       id_asd: parseInt(idAsd),
-      biliardi: biliardiConGruppi
+      biliardi: biliardiConGruppi,
+      esenzione: {
+        num_tesserati: numTesserati,
+        max_esenti: maxEsenti,
+        biliardi_esenti: biliardiEsentiCount,
+        biliardi_totali: biliardiConGruppi.length,
+        biliardi_omologati: biliardiOmologatiCount
+      }
     });
 
   } catch (error) {
@@ -301,8 +329,9 @@ const { data: interventi, error: iError } = await supabaseAdmin
     res.status(500).json({ error: error.message });
   }
 });
+
 // ============================================
-// CALCOLA ESENZIONE ISI (default)
+// CALCOLA ESENZIONE ISI (default + verifica)
 // POST /api/interventi/asd/:idAsd/calcola-esenzione
 // ============================================
 router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req, res) => {
@@ -310,7 +339,7 @@ router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req
     const { idAsd } = req.params;
     console.log(`🔵 POST /interventi/asd/${idAsd}/calcola-esenzione`);
 
-    // 1. Conta tesserati attivi (con CF, categoria Ordinaria/Pre-Agonistica, attivo)
+    // 1. Conta tesserati attivi (CF univoci, categoria Ordinaria/Pre-Agonistica)
     const { data: tesseratiData, error: tError } = await supabaseAdmin
       .from('tesserati')
       .select('codice_fiscale')
@@ -323,12 +352,10 @@ router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req
 
     const cfUnici = new Set((tesseratiData || []).map(t => t.codice_fiscale));
     const numTesserati = cfUnici.size;
-
-    // 2. Calcola max_esenti = FLOOR(tesserati * 0.15)
     const maxEsenti = Math.floor(numTesserati * 0.15);
     console.log(`📊 Tesserati: ${numTesserati}, Max esenti: ${maxEsenti}`);
 
-    // 3. Recupera tutti i biliardi dell'ASD (ordinati per id_biliardo cronologico)
+    // 2. Recupera tutti i biliardi dell'ASD
     const { data: biliardi, error: bError } = await supabaseAdmin
       .from('biliardi')
       .select('id, nome_tavolo, omologato, esente')
@@ -344,28 +371,40 @@ router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req
         num_tesserati: numTesserati,
         max_esenti: maxEsenti,
         biliardi_esenti: 0,
+        biliardi_totali: 0,
+        biliardi_omologati: 0,
         biliardi: []
       });
     }
 
-    // 4. Verifica se c'è già una scelta custom (almeno 1 esente = true)
-    const esistentiEsenti = biliardi.filter(b => b.esente === true);
+    // 3. Filtra SOLO i biliardi OMOLOGATI (requisito per esenzione)
+    const biliardiOmologati = biliardi
+      .filter(b => b.omologato === true)
+      .sort((a, b) => a.id - b.id);
 
-    let idEsenti;
+    // 4. Logica Caso A/B/C (solo su biliardi omologati)
+    const esistentiEsenti = biliardiOmologati
+      .filter(b => b.esente === true)
+      .map(b => b.id)
+      .sort((a, b) => a - b);
 
-    if (esistentiEsenti.length > 0) {
-      // Scelta custom già presente → mantieni quella, ma limita a maxEsenti
-      idEsenti = esistentiEsenti.slice(0, maxEsenti).map(b => b.id);
-      console.log(`🔄 Scelta custom mantenuta: ${idEsenti.length} biliardi`);
+    let idEsenti = [];
+
+    if (esistentiEsenti.length === 0) {
+      idEsenti = biliardiOmologati.slice(0, maxEsenti).map(b => b.id);
+      console.log(`✨ Default: primi ${idEsenti.length} biliardi omologati`);
+    } else if (esistentiEsenti.length > maxEsenti) {
+      idEsenti = esistentiEsenti.slice(0, maxEsenti);
+      console.log(`✂️ Ridotti da ${esistentiEsenti.length} a ${maxEsenti} esenti`);
     } else {
-      // Nessuna scelta → default: primi N per id
-      idEsenti = biliardi.slice(0, maxEsenti).map(b => b.id);
-      console.log(`✨ Default applicato: primi ${idEsenti.length} biliardi`);
+      idEsenti = esistentiEsenti;
+      console.log(`✅ Mantenuti ${idEsenti.length} esenti`);
     }
 
-    // 5. Aggiorna tutti i biliardi
+    // 5. Aggiorna TUTTI i biliardi
     const idEsentiSet = new Set(idEsenti);
     const now = new Date().toISOString();
+    let aggiornati = 0;
 
     for (const b of biliardi) {
       const shouldBeEsente = idEsentiSet.has(b.id);
@@ -377,14 +416,19 @@ router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req
             data_calcolo_esenzione: now
           })
           .eq('id', b.id);
+        aggiornati++;
       }
     }
+
+    console.log(`✅ ${aggiornati} biliardi aggiornati`);
 
     res.json({
       success: true,
       num_tesserati: numTesserati,
       max_esenti: maxEsenti,
       biliardi_esenti: idEsenti.length,
+      biliardi_totali: biliardi.length,
+      biliardi_omologati: biliardiOmologati.length,
       biliardi: biliardi.map(b => ({
         ...b,
         esente: idEsentiSet.has(b.id)
@@ -406,7 +450,6 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
     const { idAsd } = req.params;
     console.log(`🔵 GET /interventi/asd/${idAsd}/biliardi-esenzione`);
 
-    // 1. Conta tesserati attivi
     const { data: tesseratiData, error: tError } = await supabaseAdmin
       .from('tesserati')
       .select('codice_fiscale')
@@ -421,7 +464,6 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
     const numTesserati = cfUnici.size;
     const maxEsenti = Math.floor(numTesserati * 0.15);
 
-    // 2. Recupera biliardi
     const { data: biliardi, error: bError } = await supabaseAdmin
       .from('biliardi')
       .select('id, nome_tavolo, tipo, dimensioni, omologato, esente, data_calcolo_esenzione')
@@ -448,9 +490,149 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
     res.status(500).json({ error: error.message });
   }
 });
+
 // ============================================
-// VALIDA GRUPPO DI INTERVENTI (federazione)
-// Body: { id_interventi: [1, 2, 3], omologato, note }
+// OMOLOGA BILIARDO SINGOLO (manuale)
+// PUT /api/interventi/biliardo/:idBiliardo/omologa
+// Body: { omologato: true/false }
+// ============================================
+router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req, res) => {
+  try {
+    const { idBiliardo } = req.params;
+    const { omologato = true } = req.body;
+    console.log(`🔵 PUT /interventi/biliardo/${idBiliardo}/omologa - omologato: ${omologato}`);
+
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (adminError || !admin) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    const { data: biliardo, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, id_asd')
+      .eq('id', idBiliardo)
+      .maybeSingle();
+
+    if (bError || !biliardo) {
+      return res.status(404).json({ error: 'Biliardo non trovato' });
+    }
+
+    const updateData = {
+      omologato: omologato
+    };
+
+    if (omologato) {
+      updateData.data_omologazione = new Date().toISOString().split('T')[0];
+      updateData.omologato_da = admin.id;
+      updateData.omologato_note = 'Omologazione manuale';
+    } else {
+      updateData.data_omologazione = null;
+      updateData.omologato_da = admin.id;
+      updateData.omologato_note = 'De-omologato manualmente';
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('biliardi')
+      .update(updateData)
+      .eq('id', idBiliardo)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ Biliardo ${biliardo.nome_tavolo} omologato: ${omologato}`);
+
+    res.json({
+      success: true,
+      message: omologato ? 'Biliardo omologato' : 'Biliardo de-omologato',
+      biliardo: data
+    });
+
+  } catch (error) {
+    console.error('❌ Errore omologa biliardo:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// OMOLOGA TUTTI I BILIARDI DI UN'ASD (bootstrap)
+// PUT /api/interventi/asd/:idAsd/omologa-tutti
+// Body: { omologato: true/false }
+// ============================================
+router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res) => {
+  try {
+    const { idAsd } = req.params;
+    const { omologato = true } = req.body;
+    console.log(`🔵 PUT /interventi/asd/${idAsd}/omologa-tutti - omologato: ${omologato}`);
+
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from('manutentori')
+      .select('id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (adminError || !admin) {
+      return res.status(403).json({ error: 'Utente non autorizzato' });
+    }
+
+    const { data: biliardi, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo')
+      .eq('id_asd', idAsd)
+      .eq('attivo', true);
+
+    if (bError) throw bError;
+
+    if (!biliardi || biliardi.length === 0) {
+      return res.status(404).json({ error: 'Nessun biliardo trovato per questa ASD' });
+    }
+
+    const updateData = {
+      omologato: omologato
+    };
+
+    if (omologato) {
+      updateData.data_omologazione = new Date().toISOString().split('T')[0];
+      updateData.omologato_da = admin.id;
+      updateData.omologato_note = 'Omologazione massiva (bootstrap)';
+    } else {
+      updateData.data_omologazione = null;
+      updateData.omologato_da = admin.id;
+      updateData.omologato_note = 'De-omologazione massiva';
+    }
+
+    const idBiliardi = biliardi.map(b => b.id);
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('biliardi')
+      .update(updateData)
+      .in('id', idBiliardi)
+      .select();
+
+    if (updateError) throw updateError;
+
+    console.log(`✅ ${updated.length} biliardi aggiornati`);
+
+    res.json({
+      success: true,
+      message: `${updated.length} biliardi ${omologato ? 'omologati' : 'de-omologati'}`,
+      biliardi_aggiornati: updated.length,
+      biliardi: updated
+    });
+
+  } catch (error) {
+    console.error('❌ Errore omologa-tutti:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// VALIDA GRUPPO DI INTERVENTI
 // ============================================
 router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
   try {
@@ -462,7 +644,6 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
 
     console.log(`🔵 PUT /interventi/valida-gruppo - ${id_interventi.length} interventi`);
 
-    // 1. Recupera id_manutentore (admin)
     const { data: admin, error: adminError } = await supabaseAdmin
       .from('manutentori')
       .select('id')
@@ -473,7 +654,6 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Utente non autorizzato' });
     }
 
-    // 2. Recupera tutti gli interventi (per id_biliardo)
     const { data: interventi, error: intError } = await supabaseAdmin
       .from('interventi')
       .select('id, id_biliardo')
@@ -483,7 +663,6 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Interventi non trovati' });
     }
 
-    // 3. Aggiorna tutti gli interventi
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('interventi')
       .update({
@@ -496,7 +675,6 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
 
     if (updateError) throw updateError;
 
-    // 4. Salva in verifiche_federazione (1 record per intervento)
     const verificheRecords = interventi.map(i => ({
       id_intervento: i.id,
       id_biliardo: i.id_biliardo,
@@ -512,10 +690,8 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
 
     if (verError) throw verError;
 
-    // 5. Se omologato → aggiorna i biliardi coinvolti
     if (omologato) {
       const idBiliardi = [...new Set(interventi.map(i => i.id_biliardo))];
-      
       for (const idBiliardo of idBiliardi) {
         await supabaseAdmin
           .from('biliardi')
@@ -529,8 +705,6 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
       }
     }
 
-    console.log(`✅ ${updated.length} interventi validati + ${verificheRecords.length} verifiche_federazione`);
-    
     res.json({
       success: true,
       message: `${updated.length} interventi validati`,
@@ -544,8 +718,7 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
 });
 
 // ============================================
-// CONTESTA GRUPPO DI INTERVENTI (federazione)
-// Body: { id_interventi: [1, 2, 3], motivo }
+// CONTESTA GRUPPO DI INTERVENTI
 // ============================================
 router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
   try {
@@ -561,7 +734,6 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
 
     console.log(`🔵 PUT /interventi/contesta-gruppo - ${id_interventi.length} interventi`);
 
-    // 1. Recupera id_manutentore (admin)
     const { data: admin, error: adminError } = await supabaseAdmin
       .from('manutentori')
       .select('id')
@@ -572,7 +744,6 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Utente non autorizzato' });
     }
 
-    // 2. Recupera tutti gli interventi
     const { data: interventi, error: intError } = await supabaseAdmin
       .from('interventi')
       .select('id, id_biliardo')
@@ -582,7 +753,6 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Interventi non trovati' });
     }
 
-    // 3. Aggiorna tutti gli interventi
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('interventi')
       .update({
@@ -595,7 +765,6 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
 
     if (updateError) throw updateError;
 
-    // 4. Salva in verifiche_federazione
     const verificheRecords = interventi.map(i => ({
       id_intervento: i.id,
       id_biliardo: i.id_biliardo,
@@ -611,9 +780,7 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
 
     if (verError) throw verError;
 
-    // 5. Rimuovi omologazione dai biliardi coinvolti
     const idBiliardi = [...new Set(interventi.map(i => i.id_biliardo))];
-    
     for (const idBiliardo of idBiliardi) {
       await supabaseAdmin
         .from('biliardi')
@@ -625,8 +792,6 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
         .eq('id', idBiliardo);
     }
 
-    console.log(`✅ ${updated.length} interventi contestati + ${verificheRecords.length} verifiche_federazione`);
-    
     res.json({
       success: true,
       message: `${updated.length} interventi contestati`,
@@ -638,10 +803,10 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // ============================================
 // DETTAGLIO INTERVENTO
 // ============================================
-
 router.get('/interventi/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -693,7 +858,7 @@ router.get('/interventi/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
-// VALIDA INTERVENTO (federazione)
+// VALIDA INTERVENTO (singolo)
 // ============================================
 router.put('/interventi/:id/valida', authenticate, async (req, res) => {
   try {
@@ -701,7 +866,6 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
     const { omologato = true, note = null } = req.body;
     console.log(`🔵 PUT /interventi/${id}/valida - Inizio`);
 
-    // 1. Recupera id_manutentore (admin) dall'utente loggato
     const { data: admin, error: adminError } = await supabaseAdmin
       .from('manutentori')
       .select('id')
@@ -712,7 +876,6 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Utente non autorizzato' });
     }
 
-    // 2. Recupera intervento (per id_biliardo)
     const { data: intervento, error: intError } = await supabaseAdmin
       .from('interventi')
       .select('id, id_biliardo')
@@ -723,7 +886,6 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Intervento non trovato' });
     }
 
-    // 3. Aggiorna intervento
     const { data, error } = await supabaseAdmin
       .from('interventi')
       .update({ 
@@ -737,7 +899,6 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
 
     if (error) throw error;
 
-    // 4. Salva in verifiche_federazione
     await supabaseAdmin
       .from('verifiche_federazione')
       .insert({
@@ -749,7 +910,6 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
         note: note
       });
 
-    // 5. Se omologato → aggiorna biliardo
     if (omologato) {
       await supabaseAdmin
         .from('biliardi')
@@ -762,7 +922,6 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
         .eq('id', intervento.id_biliardo);
     }
 
-    console.log('✅ Intervento validato + verifiche_federazione + biliardo aggiornato');
     res.json(data);
   } catch (error) {
     console.error('❌ Errore valida intervento:', error);
@@ -771,7 +930,7 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
 });
 
 // ============================================
-// CONTESTA INTERVENTO (federazione)
+// CONTESTA INTERVENTO (singolo)
 // ============================================
 router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
   try {
@@ -783,7 +942,6 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Motivo obbligatorio' });
     }
 
-    // 1. Recupera id_manutentore (admin)
     const { data: admin, error: adminError } = await supabaseAdmin
       .from('manutentori')
       .select('id')
@@ -794,7 +952,6 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Utente non autorizzato' });
     }
 
-    // 2. Recupera intervento
     const { data: intervento, error: intError } = await supabaseAdmin
       .from('interventi')
       .select('id, id_biliardo')
@@ -805,7 +962,6 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Intervento non trovato' });
     }
 
-    // 3. Aggiorna intervento
     const { data, error } = await supabaseAdmin
       .from('interventi')
       .update({ 
@@ -819,7 +975,6 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
 
     if (error) throw error;
 
-    // 4. Salva in verifiche_federazione
     await supabaseAdmin
       .from('verifiche_federazione')
       .insert({
@@ -831,7 +986,6 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
         note: motivo
       });
 
-    // 5. NON omologare il biliardo (o rimuovi omologazione)
     await supabaseAdmin
       .from('biliardi')
       .update({
@@ -841,7 +995,6 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
       })
       .eq('id', intervento.id_biliardo);
 
-    console.log('✅ Intervento contestato + verifiche_federazione + biliardo non omologato');
     res.json(data);
   } catch (error) {
     console.error('❌ Errore contesta intervento:', error);
@@ -849,26 +1002,18 @@ router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
   }
 });
 
-
-
 // ============================================
 // LISTA ASD PER FILTRI (SOLO ADMIN)
 // ============================================
-
 router.get('/asd', authenticate, requireRole(['admin']), async (req, res) => {
   try {
-    console.log('🔵 GET /asd - Inizio');
-    const { data, error } = await supabaseAdmin  // ← CAMBIA QUI (era supabase)
+    const { data, error } = await supabaseAdmin
       .from('asd_centri')
       .select('id, nome')
       .eq('attivo', true)
       .order('nome', { ascending: true });
 
-    if (error) {
-      console.log('❌ Errore Supabase:', error);
-      throw error;
-    }
-    console.log('✅ ASD trovate:', data.length);
+    if (error) throw error;
     res.json(data);
   } catch (error) {
     console.log('❌ Errore generale:', error);
@@ -879,7 +1024,6 @@ router.get('/asd', authenticate, requireRole(['admin']), async (req, res) => {
 // ============================================
 // BILIARDI PER ASD
 // ============================================
-
 router.get('/biliardi', async (req, res) => {
   try {
     const { asdId } = req.query;
@@ -888,7 +1032,6 @@ router.get('/biliardi', async (req, res) => {
       return res.status(400).json({ error: 'asdId richiesto' });
     }
 
-    
     const { data, error } = await supabaseAdmin 
       .from('biliardi')
       .select('*')
@@ -905,7 +1048,6 @@ router.get('/biliardi', async (req, res) => {
 // ============================================
 // UPLOAD FOTO
 // ============================================
-
 router.post('/upload-foto', authenticate, upload.single('foto'), async (req, res) => {
   try {
     const file = req.file;
@@ -934,12 +1076,12 @@ router.post('/upload-foto', authenticate, upload.single('foto'), async (req, res
     res.status(500).json({ error: error.message });
   }
 });
+
 // POST: Registra una verifica (per Direttori)
 router.post('/verifiche', authenticate, async (req, res) => {
   try {
     const { id_biliardo, id_gara, conforme, motivo, note } = req.body;
 
-    // Verifica che il direttore sia autorizzato per questa gara
     const { data: gara, error: garaError } = await supabaseAdmin
       .from('gare')
       .select('id_direttore')
@@ -948,7 +1090,6 @@ router.post('/verifiche', authenticate, async (req, res) => {
 
     if (garaError) throw garaError;
 
-    // Recupera l'id del direttore dal token
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
       .select('id')
@@ -966,7 +1107,7 @@ router.post('/verifiche', authenticate, async (req, res) => {
         id_direttore: manutentore.id,
         id_gara,
         conforme,
-        motivo: conforme ? null : motivo,  // Solo se non conforme
+        motivo: conforme ? null : motivo,
         note,
         data_verifica: new Date(),
       })
@@ -980,4 +1121,5 @@ router.post('/verifiche', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 export default router;
