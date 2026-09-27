@@ -302,6 +302,153 @@ const { data: interventi, error: iError } = await supabaseAdmin
   }
 });
 // ============================================
+// CALCOLA ESENZIONE ISI (default)
+// POST /api/interventi/asd/:idAsd/calcola-esenzione
+// ============================================
+router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req, res) => {
+  try {
+    const { idAsd } = req.params;
+    console.log(`🔵 POST /interventi/asd/${idAsd}/calcola-esenzione`);
+
+    // 1. Conta tesserati attivi (con CF, categoria Ordinaria/Pre-Agonistica, attivo)
+    const { data: tesseratiData, error: tError } = await supabaseAdmin
+      .from('tesserati')
+      .select('codice_fiscale')
+      .eq('asd_id', idAsd)
+      .eq('stato', 'attivo')
+      .in('categoria', ['Ordinaria', 'Pre-Agonistica'])
+      .not('codice_fiscale', 'is', null);
+
+    if (tError) throw tError;
+
+    const cfUnici = new Set((tesseratiData || []).map(t => t.codice_fiscale));
+    const numTesserati = cfUnici.size;
+
+    // 2. Calcola max_esenti = FLOOR(tesserati * 0.15)
+    const maxEsenti = Math.floor(numTesserati * 0.15);
+    console.log(`📊 Tesserati: ${numTesserati}, Max esenti: ${maxEsenti}`);
+
+    // 3. Recupera tutti i biliardi dell'ASD (ordinati per id_biliardo cronologico)
+    const { data: biliardi, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, omologato, esente')
+      .eq('id_asd', idAsd)
+      .eq('attivo', true)
+      .order('id', { ascending: true });
+
+    if (bError) throw bError;
+
+    if (!biliardi || biliardi.length === 0) {
+      return res.json({
+        success: true,
+        num_tesserati: numTesserati,
+        max_esenti: maxEsenti,
+        biliardi_esenti: 0,
+        biliardi: []
+      });
+    }
+
+    // 4. Verifica se c'è già una scelta custom (almeno 1 esente = true)
+    const esistentiEsenti = biliardi.filter(b => b.esente === true);
+
+    let idEsenti;
+
+    if (esistentiEsenti.length > 0) {
+      // Scelta custom già presente → mantieni quella, ma limita a maxEsenti
+      idEsenti = esistentiEsenti.slice(0, maxEsenti).map(b => b.id);
+      console.log(`🔄 Scelta custom mantenuta: ${idEsenti.length} biliardi`);
+    } else {
+      // Nessuna scelta → default: primi N per id
+      idEsenti = biliardi.slice(0, maxEsenti).map(b => b.id);
+      console.log(`✨ Default applicato: primi ${idEsenti.length} biliardi`);
+    }
+
+    // 5. Aggiorna tutti i biliardi
+    const idEsentiSet = new Set(idEsenti);
+    const now = new Date().toISOString();
+
+    for (const b of biliardi) {
+      const shouldBeEsente = idEsentiSet.has(b.id);
+      if (b.esente !== shouldBeEsente) {
+        await supabaseAdmin
+          .from('biliardi')
+          .update({ 
+            esente: shouldBeEsente,
+            data_calcolo_esenzione: now
+          })
+          .eq('id', b.id);
+      }
+    }
+
+    res.json({
+      success: true,
+      num_tesserati: numTesserati,
+      max_esenti: maxEsenti,
+      biliardi_esenti: idEsenti.length,
+      biliardi: biliardi.map(b => ({
+        ...b,
+        esente: idEsentiSet.has(b.id)
+      }))
+    });
+
+  } catch (error) {
+    console.error('❌ Errore calcola-esenzione:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// GET STATO ESENZIONE ISI
+// GET /api/interventi/asd/:idAsd/biliardi-esenzione
+// ============================================
+router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req, res) => {
+  try {
+    const { idAsd } = req.params;
+    console.log(`🔵 GET /interventi/asd/${idAsd}/biliardi-esenzione`);
+
+    // 1. Conta tesserati attivi
+    const { data: tesseratiData, error: tError } = await supabaseAdmin
+      .from('tesserati')
+      .select('codice_fiscale')
+      .eq('asd_id', idAsd)
+      .eq('stato', 'attivo')
+      .in('categoria', ['Ordinaria', 'Pre-Agonistica'])
+      .not('codice_fiscale', 'is', null);
+
+    if (tError) throw tError;
+
+    const cfUnici = new Set((tesseratiData || []).map(t => t.codice_fiscale));
+    const numTesserati = cfUnici.size;
+    const maxEsenti = Math.floor(numTesserati * 0.15);
+
+    // 2. Recupera biliardi
+    const { data: biliardi, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente, data_calcolo_esenzione')
+      .eq('id_asd', idAsd)
+      .eq('attivo', true)
+      .order('id', { ascending: true });
+
+    if (bError) throw bError;
+
+    const biliardiEsenti = (biliardi || []).filter(b => b.esente === true).length;
+
+    res.json({
+      success: true,
+      id_asd: parseInt(idAsd),
+      num_tesserati: numTesserati,
+      max_esenti: maxEsenti,
+      biliardi_totali: biliardi?.length || 0,
+      biliardi_esenti: biliardiEsenti,
+      biliardi: biliardi || []
+    });
+
+  } catch (error) {
+    console.error('❌ Errore biliardi-esenzione:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// ============================================
 // VALIDA GRUPPO DI INTERVENTI (federazione)
 // Body: { id_interventi: [1, 2, 3], omologato, note }
 // ============================================
