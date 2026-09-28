@@ -1338,14 +1338,9 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
     doc.text('email: segreteriabowling@fisbb.it  |  PEC: fisbb@pec.it', { align: 'center' });
     doc.moveDown(2);
 
-    // Titolo dinamico in base allo stato omologazione
+    // Titolo fisso (lo stato dinamico è nella riga unica sotto)
     doc.fontSize(14).font('Helvetica-Bold')
-       .text(
-         biliardo.omologato
-           ? 'BILIARDO OMOLOGATO AD USO SPORTIVO'
-           : 'BILIARDO NON OMOLOGATO',
-         { align: 'center' }
-       );
+       .text('IDENTIFICATIVO BILIARDO', { align: 'center' });
     doc.moveDown(1.5);
 
     // QR Code
@@ -1374,27 +1369,18 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
       doc.fillColor('#000000');
     }
 
-    // Stato omologazione
-    if (biliardo.omologato) {
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
-         .text('OMOLOGATO ai fini sportivi federali', { align: 'center' });
-      doc.fillColor('#000000');
-    } else {
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626')
-         .text('NON OMOLOGATO', { align: 'center' });
-      doc.fillColor('#000000');
-    }
+    // Riga unica: Stato omologazione (dinamico) | Esenzione ISI (dinamico)
+    const statoOmolog = biliardo.omologato ? 'OMOLOGATO' : 'NON OMOLOGATO';
+    const statoISI = biliardo.esente ? 'ESENTE ISI' : 'SOGGETTO ISI';
 
-    // Stato esenzione ISI (mostrato SEMPRE)
-    if (biliardo.esente) {
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
-         .text('ESENTE dall\'Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
-      doc.fillColor('#000000');
-    } else {
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#ca8a04')
-         .text('SOGGETTO a Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
-      doc.fillColor('#000000');
-    }
+    doc.fontSize(12).font('Helvetica-Bold')
+       .fillColor(biliardo.omologato ? '#16a34a' : '#dc2626')
+       .text(statoOmolog, { align: 'center', continued: true })
+       .fillColor('#000000')
+       .text('   |   ', { continued: true })
+       .fillColor(biliardo.esente ? '#16a34a' : '#ca8a04')
+       .text(statoISI, { align: 'center' });
+    doc.fillColor('#000000');
 
     doc.moveDown(1.5);
 
