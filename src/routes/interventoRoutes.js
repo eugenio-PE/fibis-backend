@@ -453,24 +453,33 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
 });
 
 // ============================================
-// OMOLOGA BILIARDO SINGOLO
+// OMOLOGA / REVOCA OMOLOGAZIONE BILIARDO SINGOLO
 // PUT /api/interventi/biliardo/:idBiliardo/omologa
+// Body: { omologato, motivo, origine }
 // ============================================
 router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req, res) => {
   try {
     const { idBiliardo } = req.params;
-    const { omologato = true } = req.body;
+    const { omologato = true, motivo = null, origine = 'admin' } = req.body;
 
-    const { data: admin, error: adminError } = await supabaseAdmin
+    console.log(`🔵 PUT /interventi/biliardo/${idBiliardo}/omologa - omologato: ${omologato}, origine: ${origine}`);
+
+    if (!motivo || motivo.trim() === '') {
+      return res.status(400).json({ error: 'Motivo obbligatorio' });
+    }
+
+    // 1. Recupera operatore
+    const { data: operatore, error: opError } = await supabaseAdmin
       .from('manutentori')
-      .select('id')
+      .select('id, ruolo')
       .eq('user_id', req.userId)
       .maybeSingle();
 
-    if (adminError || !admin) {
+    if (opError || !operatore) {
       return res.status(403).json({ error: 'Utente non autorizzato' });
     }
 
+    // 2. Recupera biliardo
     const { data: biliardo, error: bError } = await supabaseAdmin
       .from('biliardi')
       .select('id, nome_tavolo, id_asd')
@@ -481,16 +490,28 @@ router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req,
       return res.status(404).json({ error: 'Biliardo non trovato' });
     }
 
-    const updateData = { omologato };
+    // 3. Determina origine
+    let origineFinale = origine;
+    if (operatore.ruolo === 'settore_tecnico') {
+      origineFinale = 'settore_tecnico';
+    } else if (operatore.ruolo === 'direttore' || operatore.ruolo === 'arbitro') {
+      origineFinale = 'direttore';
+    } else if (operatore.ruolo === 'admin') {
+      origineFinale = 'admin';
+    }
+
+    // 4. Aggiorna biliardo
+    const updateData = { 
+      omologato,
+      omologato_note: motivo.trim(),
+      omologato_origine: origineFinale,
+      omologato_da: operatore.id
+    };
 
     if (omologato) {
       updateData.data_omologazione = new Date().toISOString().split('T')[0];
-      updateData.omologato_da = admin.id;
-      updateData.omologato_note = 'Omologazione manuale';
     } else {
       updateData.data_omologazione = null;
-      updateData.omologato_da = admin.id;
-      updateData.omologato_note = 'De-omologato manualmente';
     }
 
     const { data, error } = await supabaseAdmin
@@ -502,7 +523,20 @@ router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req,
 
     if (error) throw error;
 
-    // Ricalcola esenzione automaticamente
+    // 5. Salva nello storico
+    const { error: storicoError } = await supabaseAdmin
+      .from('storico_omologazione')
+      .insert({
+        id_biliardo: parseInt(idBiliardo),
+        omologato,
+        motivo: motivo.trim(),
+        origine: origineFinale,
+        id_operatore: operatore.id
+      });
+
+    if (storicoError) console.warn('⚠️ Errore storico:', storicoError.message);
+
+    // 6. Ricalcola esenzione
     await fetch(`${process.env.BACKEND_URL || 'http://localhost:' + (process.env.PORT || 3000)}/api/interventi/asd/${biliardo.id_asd}/calcola-esenzione`, {
       method: 'POST',
       headers: { 'Authorization': req.headers.authorization }
@@ -510,7 +544,7 @@ router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req,
 
     res.json({
       success: true,
-      message: omologato ? 'Biliardo omologato' : 'Biliardo de-omologato',
+      message: omologato ? 'Biliardo omologato' : 'Omologazione revocata',
       biliardo: data
     });
   } catch (error) {
@@ -518,26 +552,34 @@ router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req,
     res.status(500).json({ error: error.message });
   }
 });
-
 // ============================================
-// OMOLOGA TUTTI I BILIARDI DI UN'ASD
+// OMOLOGA / REVOCA TUTTI I BILIARDI DI UN'ASD
 // PUT /api/interventi/asd/:idAsd/omologa-tutti
+// Body: { omologato, motivo }
 // ============================================
 router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res) => {
   try {
     const { idAsd } = req.params;
-    const { omologato = true } = req.body;
+    const { omologato = true, motivo = null } = req.body;
 
-    const { data: admin, error: adminError } = await supabaseAdmin
+    console.log(`🔵 PUT /interventi/asd/${idAsd}/omologa-tutti - omologato: ${omologato}`);
+
+    if (!motivo || motivo.trim() === '') {
+      return res.status(400).json({ error: 'Motivo obbligatorio' });
+    }
+
+    // 1. Recupera operatore
+    const { data: operatore, error: opError } = await supabaseAdmin
       .from('manutentori')
-      .select('id')
+      .select('id, ruolo')
       .eq('user_id', req.userId)
       .maybeSingle();
 
-    if (adminError || !admin) {
+    if (opError || !operatore) {
       return res.status(403).json({ error: 'Utente non autorizzato' });
     }
 
+    // 2. Recupera biliardi
     const { data: biliardi, error: bError } = await supabaseAdmin
       .from('biliardi')
       .select('id, nome_tavolo')
@@ -550,16 +592,23 @@ router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res
       return res.status(404).json({ error: 'Nessun biliardo trovato per questa ASD' });
     }
 
-    const updateData = { omologato };
+    // 3. Determina origine
+    let origineFinale = 'admin';
+    if (operatore.ruolo === 'settore_tecnico') origineFinale = 'settore_tecnico';
+    else if (operatore.ruolo === 'direttore' || operatore.ruolo === 'arbitro') origineFinale = 'direttore';
+
+    // 4. Aggiorna tutti i biliardi
+    const updateData = { 
+      omologato,
+      omologato_note: motivo.trim(),
+      omologato_origine: origineFinale,
+      omologato_da: operatore.id
+    };
 
     if (omologato) {
       updateData.data_omologazione = new Date().toISOString().split('T')[0];
-      updateData.omologato_da = admin.id;
-      updateData.omologato_note = 'Omologazione massiva (bootstrap)';
     } else {
       updateData.data_omologazione = null;
-      updateData.omologato_da = admin.id;
-      updateData.omologato_note = 'De-omologazione massiva';
     }
 
     const idBiliardi = biliardi.map(b => b.id);
@@ -572,7 +621,22 @@ router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res
 
     if (updateError) throw updateError;
 
-    // Ricalcola esenzione automaticamente
+    // 5. Salva nello storico (1 record per biliardo)
+    const storicoRecords = biliardi.map(b => ({
+      id_biliardo: b.id,
+      omologato,
+      motivo: motivo.trim(),
+      origine: origineFinale,
+      id_operatore: operatore.id
+    }));
+
+    const { error: storicoError } = await supabaseAdmin
+      .from('storico_omologazione')
+      .insert(storicoRecords);
+
+    if (storicoError) console.warn('⚠️ Errore storico:', storicoError.message);
+
+    // 6. Ricalcola esenzione
     await fetch(`${process.env.BACKEND_URL || 'http://localhost:' + (process.env.PORT || 3000)}/api/interventi/asd/${idAsd}/calcola-esenzione`, {
       method: 'POST',
       headers: { 'Authorization': req.headers.authorization }
@@ -580,7 +644,7 @@ router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res
 
     res.json({
       success: true,
-      message: `${updated.length} biliardi ${omologato ? 'omologati' : 'de-omologati'}`,
+      message: `${updated.length} biliardi ${omologato ? 'omologati' : 'con omologazione revocata'}`,
       biliardi_aggiornati: updated.length,
       biliardi: updated
     });
@@ -589,7 +653,43 @@ router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res
     res.status(500).json({ error: error.message });
   }
 });
+// ============================================
+// STORICO OMOLOGAZIONE BILIARDO
+// GET /api/interventi/biliardo/:idBiliardo/storico-omologazione
+// ============================================
+router.get('/interventi/biliardo/:idBiliardo/storico-omologazione', authenticate, async (req, res) => {
+  try {
+    const { idBiliardo } = req.params;
+    console.log(`🔵 GET /interventi/biliardo/${idBiliardo}/storico-omologazione`);
 
+    const { data, error } = await supabaseAdmin
+      .from('storico_omologazione')
+      .select(`
+        id,
+        omologato,
+        motivo,
+        origine,
+        data_operazione,
+        operatore:manutentori!storico_omologazione_id_operatore_fkey (
+          id, nome, cognome, ruolo
+        )
+      `)
+      .eq('id_biliardo', idBiliardo)
+      .order('data_operazione', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      id_biliardo: parseInt(idBiliardo),
+      totale: data?.length || 0,
+      storico: data || []
+    });
+  } catch (error) {
+    console.error('❌ Errore storico-omologazione:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 // ============================================
 // VALIDA GRUPPO DI INTERVENTI
 // ============================================
