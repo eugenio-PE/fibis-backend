@@ -520,18 +520,16 @@ router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req,
 
     if (error) throw error;
 
-    // 6. Storico (salva solo se direttore o se motivo presente)
-    if (isDirettore || motivo) {
-      await supabaseAdmin
-        .from('storico_omologazione')
-        .insert({
-          id_biliardo: parseInt(idBiliardo),
-          omologato,
-          motivo: motivo ? motivo.trim() : null,
-          origine: origineFinale,
-          id_operatore: operatore.id
-        });
-    }
+    // 6. Storico (sempre)
+    await supabaseAdmin
+      .from('storico_omologazione')
+      .insert({
+        id_biliardo: parseInt(idBiliardo),
+        omologato,
+        motivo: motivo ? motivo.trim() : null,
+        origine: origineFinale,
+        id_operatore: operatore.id
+      });
 
     // 7. Ricalcola esenzione
     await fetch(`${process.env.BACKEND_URL || 'http://localhost:' + (process.env.PORT || 3000)}/api/interventi/asd/${biliardo.id_asd}/calcola-esenzione`, {
@@ -618,20 +616,18 @@ router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res
 
     if (updateError) throw updateError;
 
-    // 6. Storico
-    if (isDirettore || motivo) {
-      const storicoRecords = biliardi.map(b => ({
-        id_biliardo: b.id,
-        omologato,
-        motivo: motivo ? motivo.trim() : null,
-        origine: origineFinale,
-        id_operatore: operatore.id
-      }));
+    // 6. Storico (sempre)
+    const storicoRecords = biliardi.map(b => ({
+      id_biliardo: b.id,
+      omologato,
+      motivo: motivo ? motivo.trim() : null,
+      origine: origineFinale,
+      id_operatore: operatore.id
+    }));
 
-      await supabaseAdmin
-        .from('storico_omologazione')
-        .insert(storicoRecords);
-    }
+    await supabaseAdmin
+      .from('storico_omologazione')
+      .insert(storicoRecords);
 
     // 7. Ricalcola esenzione
     await fetch(`${process.env.BACKEND_URL || 'http://localhost:' + (process.env.PORT || 3000)}/api/interventi/asd/${idAsd}/calcola-esenzione`, {
