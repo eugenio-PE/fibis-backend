@@ -10,6 +10,9 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireOTP } from '../middleware/otp.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import multer from 'multer';
+import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
+import crypto from 'crypto';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -1146,5 +1149,249 @@ router.post('/verifiche', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ============================================
+// GET /api/biliardo/:uuid (PUBBLICO, per QR)
+// ============================================
+router.get('/biliardo/:uuid', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    console.log(`🔵 GET /biliardo/${uuid} (pubblico)`);
+
+    // 1. Biliardo
+    const { data: biliardo, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select(`
+        id, nome_tavolo, tipo, dimensioni, omologato, esente,
+        data_omologazione, omologato_note, omologato_origine,
+        asd_centri!biliardi_id_asd_fkey (id, nome, codice)
+      `)
+      .eq('qr_code', uuid)
+      .eq('attivo', true)
+      .maybeSingle();
+
+    if (bError || !biliardo) {
+      return res.status(404).json({ error: 'Biliardo non trovato' });
+    }
+
+    // 2. Ultima modifica omologazione
+    const { data: ultimaModifica } = await supabaseAdmin
+      .from('storico_omologazione')
+      .select(`
+        omologato, motivo, origine, data_operazione,
+        operatore:manutentori!storico_omologazione_id_operatore_fkey (
+          id, nome, cognome, ruolo
+        )
+      `)
+      .eq('id_biliardo', biliardo.id)
+      .order('data_operazione', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // 3. Ultimo intervento
+    const { data: ultimoIntervento } = await supabaseAdmin
+      .from('interventi')
+      .select(`
+        id, tipo_intervento, stato, data_intervento, numero_lotto_dichiarato,
+        manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
+        prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
+      `)
+      .eq('id_biliardo', biliardo.id)
+      .order('data_intervento', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    res.json({
+      success: true,
+      biliardo: {
+        id: biliardo.id,
+        nome_tavolo: biliardo.nome_tavolo,
+        tipo: biliardo.tipo,
+        dimensioni: biliardo.dimensioni,
+        omologato: biliardo.omologato === true,
+        esente: biliardo.esente === true,
+        data_omologazione: biliardo.data_omologazione,
+        omologato_note: biliardo.omologato_note,
+        omologato_origine: biliardo.omologato_origine
+      },
+      asd: {
+        id: biliardo.asd_centri?.id,
+        nome: biliardo.asd_centri?.nome,
+        codice: biliardo.asd_centri?.codice
+      },
+      ultima_modifica: ultimaModifica || null,
+      ultimo_intervento: ultimoIntervento || null
+    });
+
+  } catch (error) {
+    console.error('❌ Errore GET /biliardo/:uuid:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// POST /api/biliardo/:id/genera-qr (fallback, admin)
+// ============================================
+router.post('/biliardo/:id/genera-qr', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Recupera biliardo
+    const { data: biliardo, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, qr_code')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (bError || !biliardo) {
+      return res.status(404).json({ error: 'Biliardo non trovato' });
+    }
+
+    if (biliardo.qr_code) {
+      return res.json({
+        success: true,
+        message: 'QR code già presente',
+        qr_code: biliardo.qr_code
+      });
+    }
+
+    // Genera UUID (PostgreSQL ha gen_random_uuid())
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('biliardi')
+      .update({ qr_code: crypto.randomUUID() })
+      .eq('id', id)
+      .select('id, qr_code')
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({
+      success: true,
+      message: 'QR code generato',
+      qr_code: updated.qr_code
+    });
+  } catch (error) {
+    console.error('❌ Errore genera-qr:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// POST /api/biliardo/:id/genera-qr-pdf (admin + presidente)
+// ============================================
+router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🔵 POST /biliardo/${id}/genera-qr-pdf`);
+
+    const { data: biliardo, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select(`
+        id, nome_tavolo, tipo, dimensioni, omologato, esente, qr_code,
+        asd_centri!biliardi_id_asd_fkey (nome, codice)
+      `)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (bError || !biliardo) {
+      return res.status(404).json({ error: 'Biliardo non trovato' });
+    }
+
+    if (!biliardo.qr_code) {
+      return res.status(400).json({ error: 'QR code non generato' });
+    }
+
+    const baseUrl = process.env.FRONTEND_URL || 'https://fibis-admin.vercel.app';
+    const url = `${baseUrl}/biliardo/${biliardo.qr_code}`;
+
+    const qrDataUrl = await QRCode.toDataURL(url, {
+      width: 400, margin: 1,
+      color: { dark: '#000000', light: '#FFFFFF' }
+    });
+
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+
+    // Header
+    doc.fontSize(16).font('Helvetica-Bold')
+       .text('FEDERAZIONE ITALIANA SPORT BILIARDO E BOWLING', { align: 'center' });
+    doc.fontSize(10).font('Helvetica')
+       .text('Riconosciuta dal C.O.N.I.', { align: 'center' });
+    doc.fontSize(9)
+       .text('Sede Nazionale – Viale Tiziano, 70 – 00196 Roma', { align: 'center' });
+    doc.text('PEC: fisbb@pec.it | Web: www.fisbb.it', { align: 'center' });
+    doc.moveDown(2);
+
+    doc.fontSize(14).font('Helvetica-Bold')
+       .text('BILIARDO OMOLOGATO AD USO SPORTIVO', { align: 'center' });
+    doc.moveDown(1.5);
+
+    // QR Code
+    const qrSize = 250;
+    const qrX = (doc.page.width - qrSize) / 2;
+    doc.image(qrDataUrl, qrX, doc.y, { width: qrSize, height: qrSize });
+    doc.y += qrSize + 20;
+
+    // Dati
+    doc.fontSize(11).font('Helvetica-Bold')
+       .text(`ASD: ${biliardo.asd_centri?.nome || 'N/A'}`, { align: 'center' });
+    doc.fontSize(11).font('Helvetica')
+       .text(`Tavolo: ${biliardo.nome_tavolo}`, { align: 'center' });
+    doc.text(`Tipo: ${biliardo.tipo} (${biliardo.dimensioni})`, { align: 'center' });
+    doc.text(`Codice: ${biliardo.qr_code}`, { align: 'center' });
+    doc.moveDown(1.5);
+
+    // Stato
+    if (biliardo.omologato) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
+         .text('✅ OMOLOGATO ai fini sportivi federali', { align: 'center' });
+      doc.fillColor('#000000');
+    } else {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626')
+         .text('❌ NON OMOLOGATO', { align: 'center' });
+      doc.fillColor('#000000');
+    }
+
+    if (biliardo.omologato && biliardo.esente) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
+         .text('✅ ESENTE dall\'Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
+      doc.fillColor('#000000');
+    } else if (biliardo.omologato && !biliardo.esente) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#ca8a04')
+         .text('⚠️ SOGGETTO a Imposta sugli Intrattenimenti', { align: 'center' });
+      doc.fillColor('#000000');
+    }
+
+    doc.moveDown(2);
+
+    // Riferimenti normativi
+    doc.fontSize(9).font('Helvetica-Bold')
+       .text('Riferimenti normativi:');
+    doc.fontSize(8).font('Helvetica')
+       .text('• Art. 110, comma 7 del T.U.L.P.S. (R.D. 773/1931)')
+       .text('• Protocollo d\'Intesa ADM-CONI del 10 maggio 2022')
+       .text('• Circolare ADM Direzione Giochi n. 21/2022')
+       .text('• Decreto Legislativo 28 febbraio 2021, n. 39');
+
+    doc.moveDown(1);
+    doc.fontSize(8)
+       .text(`Data emissione: ${new Date().toLocaleDateString('it-IT')}`, { align: 'right' });
+
+    doc.end();
+
+    const pdfBuffer = await new Promise((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="biliardo-${biliardo.qr_code}.pdf"`);
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('❌ Errore genera-qr-pdf:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 export default router;
+
