@@ -1300,6 +1300,19 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'QR code non generato' });
     }
 
+    // Recupera ultimo intervento
+    const { data: ultimoIntervento } = await supabaseAdmin
+      .from('interventi')
+      .select(`
+        id, tipo_intervento, stato, data_intervento, numero_lotto_dichiarato,
+        manutentori!interventi_id_manutentore_fkey (nome, cognome),
+        prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
+      `)
+      .eq('id_biliardo', id)
+      .order('data_intervento', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     const baseUrl = process.env.FRONTEND_URL || 'https://fibis-admin.vercel.app';
     const url = `${baseUrl}/biliardo/${biliardo.qr_code}`;
 
@@ -1361,15 +1374,57 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
       doc.fillColor('#000000');
     }
 
-    // Stato esenzione ISI
-    if (biliardo.omologato && biliardo.esente) {
+    // Stato omologazione
+    if (biliardo.omologato) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
+         .text('OMOLOGATO ai fini sportivi federali', { align: 'center' });
+      doc.fillColor('#000000');
+    } else {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626')
+         .text('NON OMOLOGATO', { align: 'center' });
+      doc.fillColor('#000000');
+    }
+
+    // Stato esenzione ISI (mostrato SEMPRE)
+    if (biliardo.esente) {
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
          .text('ESENTE dall\'Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
       doc.fillColor('#000000');
-    } else if (biliardo.omologato && !biliardo.esente) {
+    } else {
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#ca8a04')
-         .text('SOGGETTO a Imposta sugli Intrattenimenti', { align: 'center' });
+         .text('SOGGETTO a Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
       doc.fillColor('#000000');
+    }
+
+    doc.moveDown(1.5);
+
+    // Ultimo intervento di manutenzione
+    if (ultimoIntervento) {
+      doc.fontSize(11).font('Helvetica-Bold')
+         .text('ULTIMO INTERVENTO DI MANUTENZIONE', { align: 'center' });
+      doc.moveDown(0.5);
+
+      const manutentoreNome = ultimoIntervento.manutentori
+        ? `${ultimoIntervento.manutentori.nome} ${ultimoIntervento.manutentori.cognome}`
+        : 'N/A';
+      const prodotto = ultimoIntervento.prodotti_omologati
+        ? `${ultimoIntervento.prodotti_omologati.marca || ''} ${ultimoIntervento.prodotti_omologati.modello || ''}`.trim()
+        : 'N/A';
+
+      const dataInt = ultimoIntervento.data_intervento
+        ? new Date(ultimoIntervento.data_intervento).toLocaleString('it-IT')
+        : 'N/A';
+
+      doc.fontSize(9).font('Helvetica');
+      doc.text(`Data: ${dataInt}`, { align: 'left' });
+      doc.text(`Tipo: ${ultimoIntervento.tipo_intervento}`, { align: 'left' });
+      doc.text(`Manutentore: ${manutentoreNome}`, { align: 'left' });
+      doc.text(`Prodotto: ${prodotto || 'N/A'}`, { align: 'left' });
+      doc.text(`Lotto: ${ultimoIntervento.numero_lotto_dichiarato || 'N/A'}`, { align: 'left' });
+      doc.text(`Stato: ${ultimoIntervento.stato}`, { align: 'left' });
+    } else {
+      doc.fontSize(9).font('Helvetica-Oblique')
+         .text('Nessun intervento registrato su questo biliardo.', { align: 'center' });
     }
 
     doc.moveDown(2);
