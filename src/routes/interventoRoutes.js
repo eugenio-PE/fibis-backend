@@ -1312,18 +1312,27 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
     const chunks = [];
     doc.on('data', chunk => chunks.push(chunk));
 
-    // Header
-    doc.fontSize(16).font('Helvetica-Bold')
+    // Header federale
+    doc.fontSize(14).font('Helvetica-Bold')
        .text('FEDERAZIONE ITALIANA SPORT BILIARDO E BOWLING', { align: 'center' });
-    doc.fontSize(10).font('Helvetica')
-       .text('Riconosciuta dal C.O.N.I.', { align: 'center' });
-    doc.fontSize(9)
-       .text('Sede Nazionale – Viale Tiziano, 70 – 00196 Roma', { align: 'center' });
-    doc.text('PEC: fisbb@pec.it | Web: www.fisbb.it', { align: 'center' });
+    doc.fontSize(9).font('Helvetica')
+       .text('FSN - Federazione Sportiva Nazionale', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(8).font('Helvetica')
+       .text('Sede legale: Via G.B. Piranesi, 46 - 20137 Milano', { align: 'center' });
+    doc.text('Sede operativa Bowling: Via F. Antolisei, 6 - 00173 Roma', { align: 'center' });
+    doc.text('Tel. +39 06 3311705 - 0633653218  |  Fax. +39 06 3311724', { align: 'center' });
+    doc.text('email: segreteriabowling@fisbb.it  |  PEC: fisbb@pec.it', { align: 'center' });
     doc.moveDown(2);
 
+    // Titolo dinamico in base allo stato omologazione
     doc.fontSize(14).font('Helvetica-Bold')
-       .text('BILIARDO OMOLOGATO AD USO SPORTIVO', { align: 'center' });
+       .text(
+         biliardo.omologato
+           ? 'BILIARDO OMOLOGATO AD USO SPORTIVO'
+           : 'BILIARDO NON OMOLOGATO',
+         { align: 'center' }
+       );
     doc.moveDown(1.5);
 
     // QR Code
@@ -1341,24 +1350,25 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
     doc.text(`Codice: ${biliardo.qr_code}`, { align: 'center' });
     doc.moveDown(1.5);
 
-    // Stato
+    // Stato omologazione
     if (biliardo.omologato) {
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
-         .text('✅ OMOLOGATO ai fini sportivi federali', { align: 'center' });
+         .text('OMOLOGATO ai fini sportivi federali', { align: 'center' });
       doc.fillColor('#000000');
     } else {
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626')
-         .text('❌ NON OMOLOGATO', { align: 'center' });
+         .text('NON OMOLOGATO', { align: 'center' });
       doc.fillColor('#000000');
     }
 
+    // Stato esenzione ISI
     if (biliardo.omologato && biliardo.esente) {
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#16a34a')
-         .text('✅ ESENTE dall\'Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
+         .text('ESENTE dall\'Imposta sugli Intrattenimenti (ISI)', { align: 'center' });
       doc.fillColor('#000000');
     } else if (biliardo.omologato && !biliardo.esente) {
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#ca8a04')
-         .text('⚠️ SOGGETTO a Imposta sugli Intrattenimenti', { align: 'center' });
+         .text('SOGGETTO a Imposta sugli Intrattenimenti', { align: 'center' });
       doc.fillColor('#000000');
     }
 
