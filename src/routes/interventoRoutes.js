@@ -236,7 +236,6 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
         dimensioni: b.dimensioni,
         omologato: b.omologato === true,
         esente: b.esente === true,
-        qr_code: b.qr_code || null,
         gruppi: Object.values(gruppiMap).sort((a, b) => 
           new Date(b.data_intervento) - new Date(a.data_intervento)
         )
@@ -437,18 +436,53 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
 
     if (bError) throw bError;
 
-    const biliardiEsenti = (biliardi || []).filter(b => b.esente === true).length;
-    const biliardiOmologati = (biliardi || []).filter(b => b.omologato === true).length;
+    // ===== Recupera ultimo intervento per ogni biliardo =====
+    const idsBiliardi = (biliardi || []).map(b => b.id);
+    let ultimiInterventi = {};
+
+    if (idsBiliardi.length > 0) {
+      const { data: interventi } = await supabaseAdmin
+        .from('interventi')
+        .select(`
+          id, id_biliardo, tipo_intervento, stato, data_intervento,
+          numero_lotto_dichiarato, note,
+          manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
+          prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
+        `)
+        .in('id_biliardo', idsBiliardi)
+        .order('data_intervento', { ascending: false });
+
+      // Prendi solo il primo (più recente) per ogni biliardo
+      (interventi || []).forEach(i => {
+        if (!ultimiInterventi[i.id_biliardo]) {
+          ultimiInterventi[i.id_biliardo] = {
+            ...i,
+            manutentore_nome: i.manutentori 
+              ? `${i.manutentori.nome} ${i.manutentori.cognome}` 
+              : 'N/A'
+          };
+        }
+      });
+    }
+
+    // Arricchisci i biliardi con l'ultimo intervento
+    const biliardiConInterventi = (biliardi || []).map(b => ({
+      ...b,
+      ultimo_intervento: ultimiInterventi[b.id] || null
+    }));
+
+    const biliardiEsenti = biliardiConInterventi.filter(b => b.esente === true).length;
+    const biliardiOmologati = biliardiConInterventi.filter(b => b.omologato === true).length;
 
     res.json({
       success: true,
       id_asd: parseInt(idAsd),
       num_tesserati: numTesserati,
       max_esenti: maxEsenti,
-      biliardi_totali: biliardi?.length || 0,
+      biliardi_totali: biliardiConInterventi.length,
       biliardi_omologati: biliardiOmologati,
       biliardi_esenti: biliardiEsenti,
-      biliardi: biliardi || []
+      biliardi: biliardiConInterventi
     });
   } catch (error) {
     console.error('❌ Errore biliardi-esenzione:', error);
