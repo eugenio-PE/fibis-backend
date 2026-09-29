@@ -436,7 +436,7 @@ router.get('/admin/asd', authenticate, requireRole(['admin']), async (req, res) 
   }
 });
 
-// POST: Crea una nuova ASD (AGGIORNATO con nuovi campi)
+// POST: Crea una nuova ASD (AGGIORNATO con numero_rasd)
 router.post('/admin/asd', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { 
@@ -444,7 +444,8 @@ router.post('/admin/asd', authenticate, requireRole(['admin']), async (req, res)
       responsabile_nome, responsabile_email, responsabile_telefono,
       codice, stagione, cap, comune, provincia, regione, 
       email_contatto, telefono_contatto, pec,
-      responsabile_cognome, cf_responsabile, cf_asd
+      responsabile_cognome, cf_responsabile, cf_asd,
+      numero_rasd
     } = req.body;
 
     const { data, error } = await supabaseAdmin
@@ -467,6 +468,7 @@ router.post('/admin/asd', authenticate, requireRole(['admin']), async (req, res)
         responsabile_cognome,
         cf_responsabile,
         cf_asd,
+        numero_rasd,
         attivo: true,
       })
       .select()
@@ -480,7 +482,8 @@ router.post('/admin/asd', authenticate, requireRole(['admin']), async (req, res)
   }
 });
 
-// PUT: Aggiorna una ASD (AGGIORNATO con nuovi campi)
+// 
+// PUT: Aggiorna una ASD (AGGIORNATO con numero_rasd)
 router.put('/admin/asd/:id', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -489,7 +492,8 @@ router.put('/admin/asd/:id', authenticate, requireRole(['admin']), async (req, r
       responsabile_nome, responsabile_email, responsabile_telefono,
       codice, stagione, cap, comune, provincia, regione, 
       email_contatto, telefono_contatto, pec,
-      responsabile_cognome, cf_responsabile, cf_asd
+      responsabile_cognome, cf_responsabile, cf_asd,
+      numero_rasd
     } = req.body;
 
     const { data, error } = await supabaseAdmin
@@ -512,6 +516,7 @@ router.put('/admin/asd/:id', authenticate, requireRole(['admin']), async (req, r
         responsabile_cognome,
         cf_responsabile,
         cf_asd,
+        numero_rasd,
       })
       .eq('id', id)
       .select()
