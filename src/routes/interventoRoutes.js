@@ -159,7 +159,7 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
     // 1. Recupera biliardi dell'ASD
     const { data: biliardi, error: bError } = await supabaseAdmin
       .from('biliardi')
-      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente')
+      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente, qr_code')
       .eq('id_asd', idAsd)
       .eq('attivo', true)
       .order('id', { ascending: true });
@@ -236,6 +236,7 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
         dimensioni: b.dimensioni,
         omologato: b.omologato === true,
         esente: b.esente === true,
+        qr_code: b.qr_code || null,
         gruppi: Object.values(gruppiMap).sort((a, b) => 
           new Date(b.data_intervento) - new Date(a.data_intervento)
         )
