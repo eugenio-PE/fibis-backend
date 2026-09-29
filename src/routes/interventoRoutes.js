@@ -429,7 +429,7 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
 
     const { data: biliardi, error: bError } = await supabaseAdmin
       .from('biliardi')
-      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente, data_calcolo_esenzione')
+      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente, data_calcolo_esenzione, qr_code, data_omologazione')
       .eq('id_asd', idAsd)
       .eq('attivo', true)
       .order('id', { ascending: true });
@@ -1427,6 +1427,496 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ============================================
+// POST /api/biliardo/:id/genera-qr-etichetta
+// Body/query: { formato: 'singola' | 'griglia', copie: 1 | 12 }
+// ============================================
+router.post('/biliardo/:id/genera-qr-etichetta', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { formato = 'griglia', copie = 12 } = req.query;
+    console.log(`🔵 POST /biliardo/${id}/genera-qr-etichetta - formato: ${formato}, copie: ${copie}`);
 
+    // 1. Recupera biliardo + ASD
+    const { data: biliardo, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select(`
+        id, nome_tavolo, tipo, dimensioni, qr_code,
+        asd_centri!biliardi_id_asd_fkey (nome)
+      `)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (bError || !biliardo) {
+      return res.status(404).json({ error: 'Biliardo non trovato' });
+    }
+
+    if (!biliardo.qr_code) {
+      return res.status(400).json({ error: 'QR code non generato per questo biliardo' });
+    }
+
+    // 2. Genera URL pubblico
+    const baseUrl = process.env.FRONTEND_URL || 'https://fibis-admin.vercel.app';
+    const url = `${baseUrl}/biliardo/${biliardo.qr_code}`;
+
+    // 3. Genera immagine QR
+    const qrDataUrl = await QRCode.toDataURL(url, {
+      width: 600, margin: 1,
+      color: { dark: '#000000', light: '#FFFFFF' }
+    });
+
+    // 4. Crea PDF
+    if (formato === 'singola') {
+      // ===== ETICHETTA SINGOLA 60x60 mm =====
+      // 60x60 mm = 170.08 x 170.08 pt (1 mm = 2.8346 pt)
+      const mmToPt = 2.8346;
+      const size = 60 * mmToPt;
+
+      const doc = new PDFDocument({
+        size: [size, size],
+        margin: 0
+      });
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+
+      // QR centrato orizzontalmente, in alto
+      const qrSize = 40 * mmToPt; // 40 mm
+      const qrX = (size - qrSize) / 2;
+      const qrY = 4 * mmToPt; // 4 mm dal bordo top
+
+      doc.image(qrDataUrl, qrX, qrY, { width: qrSize, height: qrSize });
+
+      // Testo sotto il QR
+      const textY = qrY + qrSize + 2 * mmToPt;
+
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000')
+         .text(biliardo.asd_centri?.nome || 'N/A', 0, textY, {
+           width: size,
+           align: 'center'
+         });
+
+      doc.fontSize(7).font('Helvetica')
+         .text(biliardo.nome_tavolo, 0, doc.y + 1, {
+           width: size,
+           align: 'center'
+         });
+
+      doc.fontSize(6).font('Helvetica-Oblique').fillColor('#666666')
+         .text('Scansiona per informazioni', 0, doc.y + 2, {
+           width: size,
+           align: 'center'
+         });
+
+      doc.end();
+
+      const pdfBuffer = await new Promise((resolve) => {
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="etichetta-${biliardo.nome_tavolo.replace(/\s+/g, '-')}.pdf"`);
+      res.send(pdfBuffer);
+
+    } else {
+      // ===== GRIGLIA A4 DINAMICA =====
+      // Formato etichetta: 63,5 x 46,6 mm (Avery L7164 → 12 per A4)
+      const mmToPt = 2.8346;
+      const labelW = 63.5 * mmToPt;
+      const labelH = 46.6 * mmToPt;
+      const cols = 3;
+      const rows = 4;
+      const perPage = cols * rows; // 12
+      const marginTop = 21 * mmToPt;   // margine superiore Avery
+      const marginLeft = 7 * mmToPt;   // margine sinistro Avery
+      const gapX = (210 * mmToPt - 2 * marginLeft - cols * labelW) / (cols - 1);
+      const gapY = 0; // Avery L7164 ha etichette adiacenti verticalmente
+
+      const doc = new PDFDocument({ size: 'A4', margin: 0 });
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+
+      const numeroCopie = Math.max(1, Math.min(parseInt(copie) || 12, 12));
+
+      for (let i = 0; i < numeroCopie; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+
+        // Nuova pagina se necessario (oltre la prima)
+        if (i > 0 && i % perPage === 0) {
+          doc.addPage();
+        }
+
+        const pageRow = row % rows;
+        const x = marginLeft + col * (labelW + gapX);
+        const y = marginTop + pageRow * (labelH + gapY);
+
+        // Bordo etichetta (leggero, per riferimento)
+        doc.rect(x, y, labelW, labelH).strokeColor('#E5E7EB').lineWidth(0.3).stroke();
+
+        // QR a sinistra (dentro l'etichetta)
+        const qrSize = 32 * mmToPt; // 32 mm
+        const qrPadding = 4 * mmToPt;
+        doc.image(qrDataUrl, x + qrPadding, y + (labelH - qrSize) / 2, {
+          width: qrSize,
+          height: qrSize
+        });
+
+        // Testo a destra
+        const textX = x + qrPadding + qrSize + 3 * mmToPt;
+        const textW = labelW - qrPadding * 2 - qrSize - 3 * mmToPt;
+        const textY = y + qrPadding + 2 * mmToPt;
+
+        doc.fontSize(7).font('Helvetica-Bold').fillColor('#000000')
+           .text(biliardo.asd_centri?.nome || 'N/A', textX, textY, {
+             width: textW,
+             align: 'left'
+           });
+
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000')
+           .text(biliardo.nome_tavolo, textX, doc.y + 2, {
+             width: textW,
+             align: 'left'
+           });
+
+        doc.fontSize(5.5).font('Helvetica-Oblique').fillColor('#666666')
+           .text('Scansiona per informazioni', textX, doc.y + 2, {
+             width: textW,
+             align: 'left'
+           });
+      }
+
+      doc.end();
+
+      const pdfBuffer = await new Promise((resolve) => {
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="etichette-${biliardo.nome_tavolo.replace(/\s+/g, '-')}.pdf"`);
+      res.send(pdfBuffer);
+    }
+
+  } catch (error) {
+    console.error('❌ Errore genera-qr-etichetta:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// ============================================
+// POST /api/asd/:idAsd/genera-etichette-tutti
+// Griglia A4 con tutti i biliardi dell'ASD
+// ============================================
+router.post('/asd/:idAsd/genera-etichette-tutti', authenticate, async (req, res) => {
+  try {
+    const { idAsd } = req.params;
+    console.log(`🔵 POST /asd/${idAsd}/genera-etichette-tutti`);
+
+    // 1. Recupera ASD
+    const { data: asd, error: asdError } = await supabaseAdmin
+      .from('asd_centri')
+      .select('id, nome, codice')
+      .eq('id', idAsd)
+      .maybeSingle();
+
+    if (asdError || !asd) {
+      return res.status(404).json({ error: 'ASD non trovata' });
+    }
+
+    // 2. Recupera biliardi attivi con qr_code
+    const { data: biliardi, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, tipo, dimensioni, qr_code')
+      .eq('id_asd', idAsd)
+      .eq('attivo', true)
+      .not('qr_code', 'is', null)
+      .order('nome_tavolo', { ascending: true });
+
+    if (bError) throw bError;
+
+    if (!biliardi || biliardi.length === 0) {
+      return res.status(404).json({ error: 'Nessun biliardo con QR code trovato' });
+    }
+
+    // 3. Genera QR per ogni biliardo
+    const baseUrl = process.env.FRONTEND_URL || 'https://fibis-admin.vercel.app';
+    const etichette = [];
+
+    for (const b of biliardi) {
+      const url = `${baseUrl}/biliardo/${b.qr_code}`;
+      const qrDataUrl = await QRCode.toDataURL(url, {
+        width: 600, margin: 1,
+        color: { dark: '#000000', light: '#FFFFFF' }
+      });
+      etichette.push({ biliardo: b, qrDataUrl });
+    }
+
+    // 4. Crea PDF A4 griglia (12 per pagina, formato Avery 63,5 x 46,6 mm)
+    const mmToPt = 2.8346;
+    const labelW = 63.5 * mmToPt;
+    const labelH = 46.6 * mmToPt;
+    const cols = 3;
+    const rows = 4;
+    const perPage = cols * rows;
+    const marginTop = 21 * mmToPt;
+    const marginLeft = 7 * mmToPt;
+    const gapX = (210 * mmToPt - 2 * marginLeft - cols * labelW) / (cols - 1);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+
+    for (let i = 0; i < etichette.length; i++) {
+      const { biliardo, qrDataUrl } = etichette[i];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+
+      // Nuova pagina se necessario
+      if (i > 0 && i % perPage === 0) {
+        doc.addPage();
+      }
+
+      const pageRow = row % rows;
+      const x = marginLeft + col * (labelW + gapX);
+      const y = marginTop + pageRow * labelH;
+
+      // Bordo etichetta
+      doc.rect(x, y, labelW, labelH).strokeColor('#E5E7EB').lineWidth(0.3).stroke();
+
+      // QR a sinistra
+      const qrSize = 32 * mmToPt;
+      const qrPadding = 4 * mmToPt;
+      doc.image(qrDataUrl, x + qrPadding, y + (labelH - qrSize) / 2, {
+        width: qrSize,
+        height: qrSize
+      });
+
+      // Testo a destra
+      const textX = x + qrPadding + qrSize + 3 * mmToPt;
+      const textW = labelW - qrPadding * 2 - qrSize - 3 * mmToPt;
+      const textY = y + qrPadding + 2 * mmToPt;
+
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#000000')
+         .text(asd.nome, textX, textY, { width: textW, align: 'left' });
+
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000')
+         .text(biliardo.nome_tavolo, textX, doc.y + 2, { width: textW, align: 'left' });
+
+      doc.fontSize(5.5).font('Helvetica-Oblique').fillColor('#666666')
+         .text('Scansiona per informazioni', textX, doc.y + 2, { width: textW, align: 'left' });
+    }
+
+    doc.end();
+
+    const pdfBuffer = await new Promise((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="etichette-qr-${asd.nome.replace(/\s+/g, '-')}.pdf"`);
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('❌ Errore genera-etichette-tutti:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// ============================================
+// POST /api/asd/:idAsd/genera-pdf
+// Genera il Documento ASD (PDF) con QR + RASD + statistiche + ISI
+// ============================================
+router.post('/asd/:idAsd/genera-pdf', authenticate, async (req, res) => {
+  try {
+    const { idAsd } = req.params;
+    console.log(`🔵 POST /asd/${idAsd}/genera-pdf`);
+
+    // 1. Recupera ASD completa
+    const { data: asd, error: asdError } = await supabaseAdmin
+      .from('asd_centri')
+      .select(`
+        id, nome, codice, numero_rasd, indirizzo, cap, comune, provincia, regione,
+        responsabile_nome, responsabile_cognome, cf_responsabile, cf_asd,
+        stagione, qr_code, attivo
+      `)
+      .eq('id', idAsd)
+      .maybeSingle();
+
+    if (asdError || !asd) {
+      return res.status(404).json({ error: 'ASD non trovata' });
+    }
+
+    // 2. Conta tesserati validi
+    const { data: tesseratiData, error: tError } = await supabaseAdmin
+      .from('tesserati')
+      .select('codice_fiscale')
+      .eq('asd_id', idAsd)
+      .eq('stato', 'attivo')
+      .in('categoria', ['Ordinaria', 'Pre-Agonistica'])
+      .not('codice_fiscale', 'is', null);
+
+    if (tError) throw tError;
+
+    const cfUnici = new Set((tesseratiData || []).map(t => t.codice_fiscale));
+    const numTesserati = cfUnici.size;
+    const maxEsenti = Math.floor(numTesserati * 0.15);
+
+    // 3. Recupera biliardi
+    const { data: biliardi, error: bError } = await supabaseAdmin
+      .from('biliardi')
+      .select('id, nome_tavolo, tipo, dimensioni, omologato, esente')
+      .eq('id_asd', idAsd)
+      .eq('attivo', true)
+      .order('id', { ascending: true });
+
+    if (bError) throw bError;
+
+    const listaBiliardi = biliardi || [];
+    const biliardiTotali = listaBiliardi.length;
+    const biliardiOmologati = listaBiliardi.filter(b => b.omologato === true).length;
+    const biliardiNonOmologati = biliardiTotali - biliardiOmologati;
+    const biliardiEsenti = listaBiliardi.filter(b => b.esente === true).length;
+    const biliardiSoggettiISI = biliardiTotali - biliardiEsenti;
+
+    // 4. Genera QR ASD
+    const qrDataUrl = asd.qr_code
+      ? await QRCode.toDataURL(asd.qr_code, {
+          width: 500, margin: 1,
+          color: { dark: '#000000', light: '#FFFFFF' }
+        })
+      : null;
+
+    // 5. Formatta indirizzo completo
+    const partiIndirizzo = [
+      asd.indirizzo,
+      asd.cap,
+      asd.comune,
+      asd.provincia ? `(${asd.provincia})` : null,
+    ].filter(Boolean);
+    const indirizzoCompleto = partiIndirizzo.length > 0 ? partiIndirizzo.join(', ') : 'Non specificato';
+
+    // 6. Formatta responsabile
+    const responsabile = [asd.responsabile_nome, asd.responsabile_cognome]
+      .filter(Boolean).join(' ') || 'Non specificato';
+
+    // 7. Helper "Non specificato"
+    const val = (v) => (v && String(v).trim() !== '') ? v : 'Non specificato';
+
+    // 8. Crea PDF
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+
+    // ===== HEADER FEDERALE =====
+    doc.fontSize(14).font('Helvetica-Bold')
+       .text('FEDERAZIONE ITALIANA SPORT BILIARDO E BOWLING', { align: 'center' });
+    doc.fontSize(9).font('Helvetica')
+       .text('FSN - Federazione Sportiva Nazionale', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(8)
+       .text('Sede legale: Via G.B. Piranesi, 46 - 20137 Milano', { align: 'center' });
+    doc.text('Sede operativa Bowling: Via F. Antolisei, 6 - 00173 Roma', { align: 'center' });
+    doc.text('Tel. +39 06 3311705 - 0633653218  |  Fax. +39 06 3311724', { align: 'center' });
+    doc.text('email: segreteriabowling@fisbb.it  |  PEC: fisbb@pec.it', { align: 'center' });
+    doc.moveDown(2);
+
+    // ===== TITOLO =====
+    doc.fontSize(14).font('Helvetica-Bold')
+       .text('DOCUMENTO IDENTIFICATIVO ASD', { align: 'center' });
+    doc.moveDown(1.5);
+
+    // ===== QR ASD =====
+    if (qrDataUrl) {
+      const qrSize = 130;
+      const qrX = (doc.page.width - qrSize) / 2;
+      doc.image(qrDataUrl, qrX, doc.y, { width: qrSize, height: qrSize });
+      doc.y += qrSize + 15;
+    } else {
+      doc.fontSize(9).font('Helvetica-Oblique')
+         .text('QR Code ASD non ancora generato', { align: 'center' });
+      doc.moveDown(1);
+    }
+
+    // ===== DATI ASD =====
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a')
+       .text('DATI ASD');
+    doc.fillColor('#000000');
+    doc.moveDown(0.3);
+
+    const labelWidth = 140;
+    const scriviRiga = (label, value) => {
+      const y = doc.y;
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#374151')
+         .text(label, 50, y, { width: labelWidth, continued: false });
+      doc.fontSize(9).font('Helvetica').fillColor('#000000')
+         .text(String(value), 50 + labelWidth, y, { width: doc.page.width - 100 - labelWidth });
+      doc.moveDown(0.4);
+    };
+
+    scriviRiga('Nome:', val(asd.nome));
+    scriviRiga('Codice FISBB:', val(asd.codice));
+    scriviRiga('Iscrizione RASD n.:', val(asd.numero_rasd));
+    scriviRiga('Codice Fiscale ASD:', val(asd.cf_asd));
+    scriviRiga('Sede legale:', indirizzoCompleto);
+    scriviRiga('Regione:', val(asd.regione));
+    scriviRiga('Responsabile:', responsabile);
+    scriviRiga('CF Responsabile:', val(asd.cf_responsabile));
+    scriviRiga('Stagione:', val(asd.stagione));
+
+    doc.moveDown(1);
+
+    // ===== STATISTICHE =====
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a')
+       .text('STATISTICHE');
+    doc.fillColor('#000000');
+    doc.moveDown(0.3);
+
+    scriviRiga('Tesserati validi:', numTesserati);
+    scriviRiga('Biliardi totali:', biliardiTotali);
+    scriviRiga('  - Omologati:', biliardiOmologati);
+    scriviRiga('  - Non omologati:', biliardiNonOmologati);
+
+    doc.moveDown(1);
+
+    // ===== ESENZIONE ISI =====
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a')
+       .text('ESENZIONE ISI');
+    doc.fillColor('#000000');
+    doc.moveDown(0.3);
+
+    scriviRiga('Max biliardi esenti consentiti:', maxEsenti);
+    scriviRiga('Biliardi esenti effettivi:', biliardiEsenti);
+    scriviRiga('Biliardi soggetti a ISI:', biliardiSoggettiISI);
+
+    doc.moveDown(1.5);
+
+    // ===== RIFERIMENTI NORMATIVI =====
+    doc.fontSize(10).font('Helvetica-Bold')
+       .text('Riferimenti normativi:');
+    doc.moveDown(0.3);
+    doc.fontSize(8).font('Helvetica')
+       .text('• Art. 110, comma 7 del T.U.L.P.S. (R.D. 773/1931)')
+       .text('• Protocollo d\'Intesa ADM-CONI del 10 maggio 2022')
+       .text('• Circolare ADM Direzione Giochi n. 21/2022')
+       .text('• Decreto Legislativo 28 febbraio 2021, n. 39');
+
+    doc.moveDown(2);
+
+    // ===== DATA EMISSIONE =====
+    doc.fontSize(8)
+       .text(`Data emissione: ${new Date().toLocaleDateString('it-IT')}`, { align: 'right' });
+
+    doc.end();
+
+    const pdfBuffer = await new Promise((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="documento-asd-${asd.codice || idAsd}.pdf"`);
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('❌ Errore genera-pdf ASD:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 export default router;
 
