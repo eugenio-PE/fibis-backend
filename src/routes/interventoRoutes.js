@@ -1358,37 +1358,15 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
     doc.text(`Codice: ${biliardo.qr_code}`, { align: 'center' });
     doc.moveDown(1.5);
 
-    // Riga unica: Stato omologazione (dinamico) | Esenzione ISI (dinamico)
+    // Riga unica: solo Stato omologazione (ISI rimosso su richiesta federazione)
     const statoOmolog = biliardo.omologato ? 'OMOLOGATO' : 'NON OMOLOGATO';
-    const statoISI = biliardo.esente ? 'ESENTE ISI' : 'SOGGETTO ISI';
-    const separatore = '   |   ';
-    const fontSize = 12;
 
-    doc.fontSize(fontSize).font('Helvetica-Bold');
-
-    // Larghezze dei 3 pezzi
-    const wStato = doc.widthOfString(statoOmolog);
-    const wSep = doc.widthOfString(separatore);
-    const wISI = doc.widthOfString(statoISI);
-    const totale = wStato + wSep + wISI;
-
-    // Posizione iniziale centrata
-    const xInizio = (doc.page.width - totale) / 2;
-    const y = doc.y;
-
-    // Disegno i 3 pezzi alle coordinate calcolate (lineBreak: false → no wrapping)
-    doc.fillColor(biliardo.omologato ? '#16a34a' : '#dc2626')
-       .text(statoOmolog, xInizio, y, { lineBreak: false });
-
-    doc.fillColor('#000000')
-       .text(separatore, xInizio + wStato, y, { lineBreak: false });
-
-    doc.fillColor(biliardo.esente ? '#16a34a' : '#ca8a04')
-       .text(statoISI, xInizio + wStato + wSep, y, { lineBreak: false });
-
+    doc.fontSize(14).font('Helvetica-Bold')
+       .fillColor(biliardo.omologato ? '#16a34a' : '#dc2626')
+       .text(statoOmolog, { align: 'center' });
     doc.fillColor('#000000');
-    // Avanza manualmente Y (perché lineBreak: false non aggiorna doc.y)
-    doc.y = y + doc.currentLineHeight() + 15;
+
+    doc.moveDown(1.5);
 
     // Ultimo intervento di manutenzione
     if (ultimoIntervento) {
