@@ -3,6 +3,7 @@ import { generaControlli, aggiornaEsito, importaManutentori } from '../controlle
 import { scanQR } from '../controllers/interventoController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { supabaseAdmin } from '../config/supabase.js';
+import crypto from 'crypto';
 
 const router = express.Router();
 
