@@ -198,17 +198,20 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
 
     if (iError) throw iError;
 
-    // 3. Raggruppa per biliardo + data + manutentore
+    // 3. Raggruppa per biliardo + GIORNO + manutentore
     const biliardiConGruppi = biliardi.map(b => {
       const intBiliardo = (interventi || []).filter(i => i.id_biliardo === b.id);
 
       const gruppiMap = {};
       intBiliardo.forEach(i => {
-        const chiave = `${b.id}_${i.data_intervento}_${i.id_manutentore}`;
+        // Estrai solo la data (YYYY-MM-DD) ignorando l'ora
+        const dataGiorno = i.data_intervento ? i.data_intervento.substring(0, 10) : 'sconosciuta';
+        const chiave = `${b.id}_${dataGiorno}_${i.id_manutentore}`;
+        
         if (!gruppiMap[chiave]) {
           gruppiMap[chiave] = {
             chiave,
-            data_intervento: i.data_intervento,
+            data_intervento: i.data_intervento,  // mantiene il timestamp originale del primo intervento
             id_manutentore: i.id_manutentore,
             manutentore_nome: i.manutentori ? `${i.manutentori.nome} ${i.manutentori.cognome}` : 'N/A',
             tipi: [],
