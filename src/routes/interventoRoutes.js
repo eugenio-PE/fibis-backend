@@ -183,19 +183,19 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
 
     const idsBiliardi = biliardi.map(b => b.id);
 
-    // 2. Recupera interventi
+    // 2. Recupera interventi (con geo estratta)
     const { data: interventi, error: iError } = await supabaseAdmin
-      .from('interventi')
+      .from('interventi_con_geo')
       .select(`
         id, id_biliardo, tipo_intervento, stato, data_intervento, id_manutentore,
         numero_lotto_dichiarato, note, data_validazione, validato_da,
         foto_confezione, foto_marchio, foto_biliardo,
+        latitudine, longitudine,
         manutentori!interventi_id_manutentore_fkey (id, nome, cognome),
         prodotti_omologati!interventi_id_prodotto_usato_fkey (marca, modello)
       `)
       .in('id_biliardo', idsBiliardi)
       .order('data_intervento', { ascending: false });
-
     if (iError) throw iError;
 
     // 3. Raggruppa per biliardo + GIORNO + manutentore
@@ -220,10 +220,15 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
             interventi: []
           };
         }
-        const g = gruppiMap[chiave];
+                const g = gruppiMap[chiave];
         g.tipi.push(i.tipo_intervento);
         g.id_interventi.push(i.id);
-        g.interventi.push(i);
+        // Includi lat/lng nell'oggetto intervento
+        g.interventi.push({
+          ...i,
+          latitudine: i.latitudine,
+          longitudine: i.longitudine,
+        });
       });
 
       Object.values(gruppiMap).forEach(g => {
