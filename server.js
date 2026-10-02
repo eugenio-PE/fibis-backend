@@ -11,7 +11,7 @@ dotenv.config();
 import authRoutes from './src/routes/authRoutes.js';
 import interventoRoutes from './src/routes/interventoRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
-import { supabase } from './src/config/supabase.js';
+import { supabase, supabaseAdmin } from './src/config/supabase.js';
 import gareRoutes from './src/routes/gareRoutes.js';
 import tesseratiRoutes from './src/routes/tesseratiRoutes.js';
 import rankingRoutes from './src/routes/rankingRoutes.js';
