@@ -5,8 +5,8 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node --import ./instrument.js server.js",
+    "dev": "nodemon --import ./instrument.js server.js",
     "scrape-ranking": "node src/workers/rankingScraper.js",
     "scrape-gare": "node src/workers/gareScraper.js",
     "scrape-risultati": "node src/workers/risultatiScraper.js",
@@ -23,6 +23,8 @@
   "author": "FIBiS",
   "license": "ISC",
   "dependencies": {
+    "@sentry/node": "^11.3.0",
+    "@sentry/profiling-node": "^11.3.0",
     "@supabase/supabase-js": "^2.110.2",
     "bcryptjs": "^3.0.3",
     "cheerio": "^1.0.0",

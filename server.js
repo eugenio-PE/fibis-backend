@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import * as Sentry from '@sentry/node';
 import http from 'http';
 import presenzeRoutes from './src/routes/presenzeRoutes.js';
 import consoleRoutes from './src/routes/consoleRoutes.js';
@@ -107,6 +108,14 @@ app.get('/api/health', async (req, res) => {
   }
 });
 // ============================================================
+// ENDPOINT DI TEST SENTRY (RIMUOVERE DOPO IL TEST)
+// ============================================================
+app.get('/api/debug-sentry', (req, res) => {
+  Sentry.logger.info('Test endpoint chiamato');
+  throw new Error('Errore di test Sentry - funziona!');
+});
+
+// ============================================================
 // ROTTA DI FALLBACK PER TEST LOGIN
 // ============================================================
 app.post('/api/auth/login', async (req, res) => {
@@ -154,8 +163,10 @@ server.listen(PORT, () => {
 // ============================================================
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled Rejection:', err);
+  Sentry.captureException(err);
 });
 
 process.on('uncaughtException', (err) => {
   console.error('❌ Uncaught Exception:', err);
+  Sentry.captureException(err);
 });
