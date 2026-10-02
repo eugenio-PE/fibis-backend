@@ -111,8 +111,16 @@ app.get('/api/health', async (req, res) => {
 // ENDPOINT DI TEST SENTRY (RIMUOVERE DOPO IL TEST)
 // ============================================================
 app.get('/api/debug-sentry', (req, res) => {
-  Sentry.logger.info('Test endpoint chiamato');
-  throw new Error('Errore di test Sentry - funziona!');
+  try {
+    throw new Error('Errore di test Sentry - funziona!');
+  } catch (err) {
+    const eventId = Sentry.captureException(err);
+    console.log('🔵 Sentry eventId:', eventId);
+    res.status(500).json({ 
+      error: err.message,
+      sentry_event_id: eventId,
+    });
+  }
 });
 
 // ============================================================
