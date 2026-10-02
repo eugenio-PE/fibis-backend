@@ -70,14 +70,42 @@ app.use('/api/direttori', direttoriRoutes);
 // ============================================================
 // HEALTH CHECK
 // ============================================================
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    message: '🚀 Server FIBiS funzionante!'
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    const start = Date.now();
+    
+    // Verifica DB
+    const { error } = await supabaseAdmin
+      .from('asd_centri')
+      .select('id', { count: 'exact', head: true })
+      .limit(1);
+    
+    if (error) throw error;
+    
+    const dbLatency = Date.now() - start;
+    
+    res.json({ 
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+      db: {
+        connected: true,
+        latency_ms: dbLatency,
+      },
+      memory: {
+        used_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        total_mb: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      },
+      version: '1.0.0',
+    });
+  } catch (error) {
+    res.status(503).json({ 
+      status: 'DEGRADED',
+      timestamp: new Date().toISOString(),
+      db: { connected: false, error: error.message },
+    });
+  }
 });
-
 // ============================================================
 // ROTTA DI FALLBACK PER TEST LOGIN
 // ============================================================
