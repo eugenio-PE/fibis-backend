@@ -33,9 +33,4 @@ Sentry.init({
 
 console.log('[SENTRY] ✅ Inizializzato correttamente');
 
-Sentry.captureMessage('Sentry avviato su Railway', {
-  level: 'info',
-  tags: { source: 'startup' },
-});
-
 export default Sentry;
