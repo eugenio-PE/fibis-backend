@@ -6,6 +6,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import * as Sentry from '@sentry/node';
 import http from 'http';
+import {
+  globalLimiter,
+  loginLimiter,
+  uploadLimiter,
+  registrazioneLimiter,
+  publicLimiter,
+} from './src/middleware/rateLimiter.js';
 import presenzeRoutes from './src/routes/presenzeRoutes.js';
 import consoleRoutes from './src/routes/consoleRoutes.js';
 // ✅ CARICA LE VARIABILI D'AMBIENTE SUBITO
@@ -32,6 +39,10 @@ import { initWebSocketServer } from './src/services/websocketService.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy (Railway è dietro un reverse proxy)
+// Senza questo, il rate limiter vede l'IP del proxy per tutti gli utenti
+app.set('trust proxy', 1);
+
 // CORS configurato correttamente
 app.use(cors({
   origin: [
@@ -53,6 +64,22 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ============================================================
+// RATE LIMITING
+// ============================================================
+// 1. Limit globale (tutte le /api/*)
+app.use('/api', globalLimiter);
+
+// 2. Limit specifici su endpoint sensibili
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/upload-foto', uploadLimiter);
+app.use('/api/produttori/registrazione', registrazioneLimiter);
+app.use('/api/produttori/upload-foto', uploadLimiter);
+app.use('/api/produttori/upload-documento', uploadLimiter);
+
+// 3. Endpoint pubblici (QR page - più permissivo)
+app.use('/api/biliardo', publicLimiter);
 
 // ============================================================
 // ROUTES - tutte collegate correttamente
@@ -113,7 +140,7 @@ app.get('/api/health', async (req, res) => {
 // ============================================================
 // ROTTA DI FALLBACK PER TEST LOGIN
 // ============================================================
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     console.log('📥 Tentativo login:', email);

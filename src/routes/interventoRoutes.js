@@ -13,6 +13,7 @@ import multer from 'multer';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
+import { heavyLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -1274,7 +1275,7 @@ router.get('/biliardo/:uuid', async (req, res) => {
 // ============================================
 // POST /api/biliardo/:id/genera-qr (fallback, admin)
 // ============================================
-router.post('/biliardo/:id/genera-qr', authenticate, async (req, res) => {
+router.post('/biliardo/:id/genera-qr', heavyLimiter, authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1321,7 +1322,7 @@ router.post('/biliardo/:id/genera-qr', authenticate, async (req, res) => {
 // ============================================
 // POST /api/biliardo/:id/genera-qr-pdf (admin + presidente)
 // ============================================
-router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
+router.post('/biliardo/:id/genera-qr-pdf', heavyLimiter, authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🔵 POST /biliardo/${id}/genera-qr-pdf`);
@@ -1474,7 +1475,7 @@ router.post('/biliardo/:id/genera-qr-pdf', authenticate, async (req, res) => {
 // POST /api/biliardo/:id/genera-qr-etichetta
 // Body/query: { formato: 'singola' | 'griglia', copie: 1 | 12 }
 // ============================================
-router.post('/biliardo/:id/genera-qr-etichetta', authenticate, async (req, res) => {
+router.post('/biliardo/:id/genera-qr-etichetta', heavyLimiter, authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const { formato = 'griglia', copie = 12 } = req.query;
@@ -1648,7 +1649,7 @@ router.post('/biliardo/:id/genera-qr-etichetta', authenticate, async (req, res) 
 // POST /api/asd/:idAsd/genera-etichette-tutti
 // Griglia A4 con tutti i biliardi dell'ASD
 // ============================================
-router.post('/asd/:idAsd/genera-etichette-tutti', authenticate, async (req, res) => {
+router.post('/asd/:idAsd/genera-etichette-tutti', heavyLimiter, authenticate, async (req, res) => {
   try {
     const { idAsd } = req.params;
     console.log(`🔵 POST /asd/${idAsd}/genera-etichette-tutti`);
@@ -1766,7 +1767,7 @@ router.post('/asd/:idAsd/genera-etichette-tutti', authenticate, async (req, res)
 // POST /api/asd/:idAsd/genera-pdf
 // Genera il Documento ASD (PDF) con QR + RASD + statistiche + ISI
 // ============================================
-router.post('/asd/:idAsd/genera-pdf', authenticate, async (req, res) => {
+router.post('/asd/:idAsd/genera-pdf', heavyLimiter, authenticate, async (req, res) => {
   try {
     const { idAsd } = req.params;
     console.log(`🔵 POST /asd/${idAsd}/genera-pdf`);
