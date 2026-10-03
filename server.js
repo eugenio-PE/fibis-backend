@@ -1,3 +1,6 @@
+import './instrument.js';
+
+// Ora il resto degli import
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
