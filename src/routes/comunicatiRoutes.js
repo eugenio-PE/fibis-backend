@@ -12,7 +12,64 @@ const ruoliMappa = {
     'direttore': 'direttori',
     'manutentore': 'manutentori',
 };
+// ============================================================
+// HELPER: RECUPERA TOKEN FCM IN BASE AI DESTINATARI
+// ============================================================
+async function getTokensByDestinatari(destinatari) {
+    if (!Array.isArray(destinatari) || destinatari.length === 0) {
+        console.log('â„¹ï¸ Nessun destinatario specificato');
+        return [];
+    }
 
+    const tokenList = [];
+
+    // 1. Tesserati
+    if (destinatari.includes('tesserati')) {
+        const { data: tokensTess } = await supabaseAdmin
+            .from('device_tokens')
+            .select('fcm_token')
+            .eq('is_active', true)
+            .not('tesserato_id', 'is', null);
+
+        const count = (tokensTess || []).length;
+        console.log(`ðŸ“± Tesserati: ${count} token`);
+        tokenList.push(...(tokensTess || []).map(t => t.fcm_token));
+    }
+
+    // 2. Ruoli manutentori (presidenti, direttori, manutentori)
+    const ruoliRichiesti = [];
+    if (destinatari.includes('presidenti')) ruoliRichiesti.push('presidente');
+    if (destinatari.includes('direttori')) ruoliRichiesti.push('direttore');
+    if (destinatari.includes('manutentori')) ruoliRichiesti.push('manutentore');
+
+    if (ruoliRichiesti.length > 0) {
+        const { data: manutentori } = await supabaseAdmin
+            .from('manutentori')
+            .select('id, ruolo')
+            .in('ruolo', ruoliRichiesti);
+
+        const idsManutentori = (manutentori || []).map(m => m.id);
+        console.log(`ðŸ‘¤ Ruoli ${ruoliRichiesti.join(', ')}: ${idsManutentori.length} manutentori`);
+
+        if (idsManutentori.length > 0) {
+            const { data: tokensMan } = await supabaseAdmin
+                .from('device_tokens')
+                .select('fcm_token')
+                .eq('is_active', true)
+                .in('manutentore_id', idsManutentori);
+
+            const countMan = (tokensMan || []).length;
+            console.log(`ðŸ“± Manutentori (${ruoliRichiesti.join(', ')}): ${countMan} token`);
+            tokenList.push(...(tokensMan || []).map(t => t.fcm_token));
+        }
+    }
+
+    // 3. Rimuovi duplicati
+    const tokenUnici = [...new Set(tokenList)];
+    console.log(`ðŸ“± Token totali unici: ${tokenUnici.length}`);
+
+    return tokenUnici;
+}
 // ============================================================
 // 0. API PER I DROPDOWN (NUOVE)
 // ============================================================
@@ -166,21 +223,16 @@ router.post('/', authenticate, async (req, res) => {
             return res.status(400).json({ error: error.message });
         }
 
-        // ✅ INVIA NOTIFICHE PUSH AI DESTINATARI
+        // âœ… INVIA NOTIFICHE PUSH AI DESTINATARI
         try {
-            console.log(`📨 Invio notifiche push per comunicato ${data.id}: "${data.titolo}"`);
+            console.log(`ðŸ“¨ Invio notifiche push per comunicato ${data.id}: "${data.titolo}"`);
+            console.log(`ðŸ“¨ Destinatari richiesti: ${JSON.stringify(data.destinatari)}`);
 
-            const { data: tokens, error: tokenError } = await supabaseAdmin
-                .from('device_tokens')
-                .select('fcm_token')
-                .eq('is_active', true);
+            // 1. Determina i token in base ai destinatari
+            const tokenList = await getTokensByDestinatari(data.destinatari);
+            console.log(`ðŸ“± Token FCM trovati: ${tokenList.length}`);
 
-            if (tokenError) {
-                console.error('❌ Errore recupero token FCM:', tokenError);
-            } else if (tokens && tokens.length > 0) {
-                const tokenList = tokens.map(t => t.fcm_token);
-                console.log(`📱 Token FCM trovati: ${tokenList.length}`);
-
+            if (tokenList.length > 0) {
                 const { sendPushNotificationMultiple } = await import('../services/firebaseService.js');
 
                 await sendPushNotificationMultiple(
@@ -193,12 +245,12 @@ router.post('/', authenticate, async (req, res) => {
                         click_action: 'FLUTTER_NOTIFICATION_CLICK',
                     }
                 );
-                console.log(`✅ Notifiche push inviate per comunicato ${data.id}`);
+                console.log(`âœ… Notifiche push inviate per comunicato ${data.id}`);
             } else {
-                console.log('ℹ️ Nessun token FCM attivo trovato');
+                console.log('â„¹ï¸ Nessun token FCM attivo trovato per i destinatari richiesti');
             }
         } catch (pushError) {
-            console.error('❌ Errore invio notifiche push:', pushError);
+            console.error('âŒ Errore invio notifiche push:', pushError);
         }
 
         res.status(201).json({ success: true, comunicato: data });

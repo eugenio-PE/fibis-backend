@@ -69,7 +69,14 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // RATE LIMITING
 // ============================================================
 // 1. Limit globale (tutte le /api/*)
-app.use('/api', globalLimiter);
+// ⚠️ ESCLUDE console e presenze (gare live - no rate limit)
+app.use('/api', (req, res, next) => {
+  // Skip rate limit per console (chiamate partite live) e presenze
+  if (req.path.startsWith('/console') || req.path.startsWith('/presenze')) {
+    return next();
+  }
+  return globalLimiter(req, res, next);
+});
 
 // 2. Limit specifici su endpoint sensibili
 app.use('/api/auth/login', loginLimiter);
@@ -80,7 +87,6 @@ app.use('/api/produttori/upload-documento', uploadLimiter);
 
 // 3. Endpoint pubblici (QR page - più permissivo)
 app.use('/api/biliardo', publicLimiter);
-
 // ============================================================
 // ROUTES - tutte collegate correttamente
 // ============================================================
