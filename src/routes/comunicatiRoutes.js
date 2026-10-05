@@ -1,7 +1,7 @@
 // src/routes/comunicatiRoutes.js
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -75,7 +75,7 @@ async function getTokensByDestinatari(destinatari) {
 // ============================================================
 
 // GET /regioni - Ottieni tutte le regioni uniche da asd_centri
-router.get('/regioni', authenticate, async (req, res) => {
+router.get('/regioni', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('asd_centri')
@@ -102,7 +102,7 @@ router.get('/regioni', authenticate, async (req, res) => {
 });
 
 // GET /province/:regione - Ottieni province per regione
-router.get('/province/:regione', authenticate, async (req, res) => {
+router.get('/province/:regione', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
     try {
         const { regione } = req.params;
 
@@ -132,7 +132,7 @@ router.get('/province/:regione', authenticate, async (req, res) => {
 
 // GET /asd - Ottieni tutte le ASD
 // NOTA: /asd esiste già in interventoRoutes.js, ma la mettiamo per completezza
-router.get('/asd', authenticate, async (req, res) => {
+router.get('/asd', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('asd_centri')
@@ -146,10 +146,9 @@ router.get('/asd', authenticate, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-// ============================================================
-// 1. CREA UN NUOVO COMUNICATO (ADMIN O PRESIDENTE)
-// ============================================================
-router.post('/', authenticate, async (req, res) => {
+// 1. CREA UN NUOVO COMUNICATO
+// Admin: tutti i tipi. Settore tecnico: solo diretta_youtube. Presidente: solo dalla sua app (futuro).
+router.post('/', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
     try {
         const { titolo, contenuto, destinatari, priorita, data_scadenza, tipo, link, filtro_regione, filtro_provincia, filtro_asd_id } = req.body;
         const userId = req.user.id;
@@ -164,12 +163,20 @@ router.post('/', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'Non autorizzato' });
         }
 
-        const isAdmin = user.ruolo === 'admin';
-        const isPresidente = user.ruolo === 'presidente';
+  const isAdmin = user.ruolo === 'admin';
+const isPresidente = user.ruolo === 'presidente';
+const isSettoreTecnico = user.ruolo === 'settore_tecnico';
 
-        if (!isAdmin && !isPresidente) {
-            return res.status(403).json({ error: 'Permessi insufficienti' });
-        }
+if (!isAdmin && !isPresidente && !isSettoreTecnico) {
+    return res.status(403).json({ error: 'Permessi insufficienti' });
+}
+
+// Settore tecnico: può creare solo comunicati di tipo diretta_youtube
+if (isSettoreTecnico && tipo !== 'diretta_youtube') {
+    return res.status(403).json({ 
+        error: 'Il settore tecnico può creare solo comunicati di tipo diretta_youtube' 
+    });
+}
 
         // 🔐 SE È PRESIDENTE → FORZA i filtri sulla sua ASD
         let filtroRegioneFinale = filtro_regione || null;
@@ -261,10 +268,11 @@ router.post('/', authenticate, async (req, res) => {
     }
 });
 
+
 // ============================================================
 // 2. ELIMINA UN COMUNICATO (SOLO ADMIN)
 // ============================================================
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:id', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const userId = req.user.id;
         const comunicatoId = parseInt(req.params.id);

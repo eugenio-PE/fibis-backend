@@ -21,20 +21,20 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ============================================
 // ROTTE PUBBLICHE
 // ============================================
-router.get('/asd/:qrCode', scanQR);
+router.get('/asd/:qrCode', authenticate, requireRole(['manutentore', 'direttore', 'arbitro', 'admin', 'settore_tecnico']), scanQR);
 
 // ============================================
 // ROTTE PROTETTE
 // ============================================
-router.get('/prodotti', getProdotti);
-router.post('/verifica-lotto', authenticate, verificaLotto);
-router.post('/interventi', authenticate, requireOTP, registraIntervento);
-router.get('/storico/:asdId', authenticate, getStorico);
+router.get('/prodotti', authenticate, requireRole(['admin', 'settore_tecnico', 'manutentore', 'presidente', 'direttore']), getProdotti);
+router.post('/verifica-lotto', authenticate, requireRole(['admin', 'settore_tecnico', 'manutentore', 'presidente', 'direttore']), verificaLotto);
+router.post('/interventi', authenticate, requireRole(['manutentore', 'admin', 'settore_tecnico']), requireOTP, registraIntervento);
+router.get('/storico/:asdId', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'manutentore']), getStorico);
 
 // ============================================
 // ULTIMI INTERVENTI
 // ============================================
-router.get('/interventi/ultimi', authenticate, async (req, res) => {
+router.get('/interventi/ultimi', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const limit = req.query.limit || 10;
     const { data, error } = await supabaseAdmin
@@ -58,7 +58,7 @@ router.get('/interventi/ultimi', authenticate, async (req, res) => {
 // ============================================
 // LISTA INTERVENTI CON FILTRI
 // ============================================
-router.get('/interventi', authenticate, async (req, res) => {
+router.get('/interventi', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { asdId } = req.query;
     let query = supabaseAdmin
@@ -91,7 +91,7 @@ router.get('/interventi', authenticate, async (req, res) => {
 // ============================================
 // LISTA ASD CON RIEPILOGO INTERVENTI (Livello 1)
 // ============================================
-router.get('/interventi/raggruppati-asd', authenticate, async (req, res) => {
+router.get('/interventi/raggruppati-asd', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { data: interventi, error } = await supabaseAdmin
       .from('interventi')
@@ -153,7 +153,7 @@ router.get('/interventi/raggruppati-asd', authenticate, async (req, res) => {
 // ============================================
 // BILIARDI + GRUPPI INTERVENTI DI UN'ASD (Livello 2)
 // ============================================
-router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) => {
+router.get('/interventi/asd/:idAsd/raggruppati', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { idAsd } = req.params;
 
@@ -288,7 +288,7 @@ router.get('/interventi/asd/:idAsd/raggruppati', authenticate, async (req, res) 
 // CALCOLA ESENZIONE ISI (con logica corretta A/B/C)
 // POST /api/interventi/asd/:idAsd/calcola-esenzione
 // ============================================
-router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req, res) => {
+router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { idAsd } = req.params;
     console.log(`🔵 POST /interventi/asd/${idAsd}/calcola-esenzione`);
@@ -418,7 +418,7 @@ router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, async (req
 // ============================================
 // GET STATO ESENZIONE ISI
 // ============================================
-router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req, res) => {
+router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { idAsd } = req.params;
 
@@ -504,7 +504,7 @@ router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, async (req
 // PUT /api/interventi/biliardo/:idBiliardo/omologa
 // Body: { omologato, motivo, origine }
 // ============================================
-router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req, res) => {
+router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, requireRole(['admin', 'settore_tecnico', 'direttore', 'arbitro']), async (req, res) => {
   try {
     const { idBiliardo } = req.params;
     const { omologato = true, motivo = null, origine = 'admin' } = req.body;
@@ -599,7 +599,7 @@ router.put('/interventi/biliardo/:idBiliardo/omologa', authenticate, async (req,
 // PUT /api/interventi/asd/:idAsd/omologa-tutti
 // Body: { omologato, motivo }
 // ============================================
-router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res) => {
+router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { idAsd } = req.params;
     const { omologato = true, motivo = null } = req.body;
@@ -697,7 +697,7 @@ router.put('/interventi/asd/:idAsd/omologa-tutti', authenticate, async (req, res
 // STORICO OMOLOGAZIONE BILIARDO
 // GET /api/interventi/biliardo/:idBiliardo/storico-omologazione
 // ============================================
-router.get('/interventi/biliardo/:idBiliardo/storico-omologazione', authenticate, async (req, res) => {
+router.get('/interventi/biliardo/:idBiliardo/storico-omologazione', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { idBiliardo } = req.params;
     console.log(`🔵 GET /interventi/biliardo/${idBiliardo}/storico-omologazione`);
@@ -733,7 +733,7 @@ router.get('/interventi/biliardo/:idBiliardo/storico-omologazione', authenticate
 // ============================================
 // VALIDA GRUPPO DI INTERVENTI
 // ============================================
-router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
+router.put('/interventi/valida-gruppo', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { id_interventi, omologato = true, note = null } = req.body;
 
@@ -816,7 +816,7 @@ router.put('/interventi/valida-gruppo', authenticate, async (req, res) => {
 // ============================================
 // CONTESTA GRUPPO DI INTERVENTI
 // ============================================
-router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
+router.put('/interventi/contesta-gruppo', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { id_interventi, motivo } = req.body;
 
@@ -900,7 +900,7 @@ router.put('/interventi/contesta-gruppo', authenticate, async (req, res) => {
 // ============================================
 // DETTAGLIO INTERVENTO
 // ============================================
-router.get('/interventi/:id', authenticate, async (req, res) => {
+router.get('/interventi/:id', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'manutentore', 'direttore']), async (req, res) => {
   try {
     const { id } = req.params;
     const { data, error } = await supabaseAdmin
@@ -933,7 +933,7 @@ router.get('/interventi/:id', authenticate, async (req, res) => {
 // ============================================
 // VALIDA INTERVENTO (singolo)
 // ============================================
-router.put('/interventi/:id/valida', authenticate, async (req, res) => {
+router.put('/interventi/:id/valida', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { id } = req.params;
     const { omologato = true, note = null } = req.body;
@@ -1004,7 +1004,7 @@ router.put('/interventi/:id/valida', authenticate, async (req, res) => {
 // ============================================
 // CONTESTA INTERVENTO (singolo)
 // ============================================
-router.put('/interventi/:id/contesta', authenticate, async (req, res) => {
+router.put('/interventi/:id/contesta', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { id } = req.params;
     const { motivo } = req.body;
@@ -1095,7 +1095,7 @@ router.get('/asd', authenticate, requireRole(['admin']), async (req, res) => {
 // ============================================
 // BILIARDI PER ASD
 // ============================================
-router.get('/biliardi', async (req, res) => {
+router.get('/biliardi', authenticate, requireRole(['admin', 'settore_tecnico', 'manutentore', 'presidente', 'direttore', 'arbitro']), async (req, res) => {
   try {
     const { asdId } = req.query;
     if (!asdId) {
@@ -1118,7 +1118,7 @@ router.get('/biliardi', async (req, res) => {
 // ============================================
 // UPLOAD FOTO
 // ============================================
-router.post('/upload-foto', authenticate, upload.single('foto'), async (req, res) => {
+router.post('/upload-foto', authenticate, requireRole(['manutentore']), upload.single('foto'), async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
@@ -1150,7 +1150,7 @@ router.post('/upload-foto', authenticate, upload.single('foto'), async (req, res
 // ============================================
 // REGISTRA VERIFICA (per Direttori)
 // ============================================
-router.post('/verifiche', authenticate, async (req, res) => {
+router.post('/verifiche', authenticate, requireRole(['direttore']), async (req, res) => {
   try {
     const { id_biliardo, id_gara, conforme, motivo, note } = req.body;
 
@@ -1275,7 +1275,7 @@ router.get('/biliardo/:uuid', async (req, res) => {
 // ============================================
 // POST /api/biliardo/:id/genera-qr (fallback, admin)
 // ============================================
-router.post('/biliardo/:id/genera-qr', heavyLimiter, authenticate, async (req, res) => {
+router.post('/biliardo/:id/genera-qr', heavyLimiter, authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1322,7 +1322,7 @@ router.post('/biliardo/:id/genera-qr', heavyLimiter, authenticate, async (req, r
 // ============================================
 // POST /api/biliardo/:id/genera-qr-pdf (admin + presidente)
 // ============================================
-router.post('/biliardo/:id/genera-qr-pdf', heavyLimiter, authenticate, async (req, res) => {
+router.post('/biliardo/:id/genera-qr-pdf', heavyLimiter, authenticate, requireRole(['admin', 'settore_tecnico', 'presidente']), async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🔵 POST /biliardo/${id}/genera-qr-pdf`);
@@ -1475,7 +1475,7 @@ router.post('/biliardo/:id/genera-qr-pdf', heavyLimiter, authenticate, async (re
 // POST /api/biliardo/:id/genera-qr-etichetta
 // Body/query: { formato: 'singola' | 'griglia', copie: 1 | 12 }
 // ============================================
-router.post('/biliardo/:id/genera-qr-etichetta', heavyLimiter, authenticate, async (req, res) => {
+router.post('/biliardo/:id/genera-qr-etichetta', heavyLimiter, authenticate, requireRole(['admin', 'settore_tecnico', 'presidente']), async (req, res) => {
   try {
     const { id } = req.params;
     const { formato = 'griglia', copie = 12 } = req.query;
@@ -1649,7 +1649,7 @@ router.post('/biliardo/:id/genera-qr-etichetta', heavyLimiter, authenticate, asy
 // POST /api/asd/:idAsd/genera-etichette-tutti
 // Griglia A4 con tutti i biliardi dell'ASD
 // ============================================
-router.post('/asd/:idAsd/genera-etichette-tutti', heavyLimiter, authenticate, async (req, res) => {
+router.post('/asd/:idAsd/genera-etichette-tutti', heavyLimiter, authenticate, requireRole(['admin', 'settore_tecnico', 'presidente']), async (req, res) => {
   try {
     const { idAsd } = req.params;
     console.log(`🔵 POST /asd/${idAsd}/genera-etichette-tutti`);
@@ -1767,7 +1767,7 @@ router.post('/asd/:idAsd/genera-etichette-tutti', heavyLimiter, authenticate, as
 // POST /api/asd/:idAsd/genera-pdf
 // Genera il Documento ASD (PDF) con QR + RASD + statistiche + ISI
 // ============================================
-router.post('/asd/:idAsd/genera-pdf', heavyLimiter, authenticate, async (req, res) => {
+router.post('/asd/:idAsd/genera-pdf', heavyLimiter, authenticate, requireRole(['admin', 'settore_tecnico', 'presidente']), async (req, res) => {
   try {
     const { idAsd } = req.params;
     console.log(`🔵 POST /asd/${idAsd}/genera-pdf`);
@@ -1963,4 +1963,3 @@ router.post('/asd/:idAsd/genera-pdf', heavyLimiter, authenticate, async (req, re
   }
 });
 export default router;
-
