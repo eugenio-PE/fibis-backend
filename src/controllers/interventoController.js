@@ -1,7 +1,7 @@
 import ASDModel from '../models/ASD.js';
 import ProdottoModel from '../models/Prodotto.js';
 import InterventoModel from '../models/Intervento.js';
-import { supabase } from '../config/supabase.js';
+import { supabaseAdmin } from '../config/supabase.js';
 
 export const scanQR = async (req, res) => {
   try {
@@ -55,7 +55,7 @@ export const registraIntervento = async (req, res) => {
     } = req.body;
 
     // Verifica che i biliardi appartengano all'ASD
-    const { data: biliardi, error: biliardiError } = await supabase
+    const { data: biliardi, error: biliardiError } = await supabaseAdmin
       .from('biliardi')
       .select('id')
       .in('id', id_biliardi)
@@ -67,11 +67,11 @@ export const registraIntervento = async (req, res) => {
     }
 
     // Recupera l'ID del manutentore
-    const { data: manutentore, error: manutentoreError } = await supabase
-      .from('manutentori')
-      .select('id')
-      .eq('user_id', req.userId)
-      .single();
+const { data: manutentore, error: manutentoreError } = await supabaseAdmin
+  .from('manutentori')
+  .select('id')
+  .eq('user_id', req.userId)
+  .single();
 
     if (manutentoreError) throw manutentoreError;
 
