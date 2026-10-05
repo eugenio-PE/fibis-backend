@@ -27,10 +27,10 @@ router.get('/:id', authenticate, getTesseratoById);
 router.get('/user/:userId', authenticate, getTesseratoByUserId);
 
 // Rotta per creare un nuovo tesserato (POST)
-router.post('/', authenticate, requireRole(['admin', 'presidente']), createTesseratoWithAuth);
+router.post('/', authenticate, requireRole(['admin']), createTesseratoWithAuth);
 
 // Rotta per aggiornare un tesserato (PUT)
-router.put('/:id', authenticate, requireRole(['admin', 'presidente']), updateTesserato);
+router.put('/:id', authenticate, requireRole(['admin']), updateTesserato);
 
 // Rotta per eliminare un tesserato (DELETE)
 router.delete('/:id', authenticate, requireRole(['admin']), deleteTesserato);
@@ -39,15 +39,16 @@ router.delete('/:id', authenticate, requireRole(['admin']), deleteTesserato);
 router.post('/import-csv', authenticate, requireRole(['admin']), importTesseratiFromCSV);
 
 // Rotta per aggiungere una stecca a un tesserato (POST)
-router.post('/:id/stecca', authenticate, addStecca);
+router.post('/:id/stecca', authenticate, requireRole(['tesserato']), addStecca);
 
 // Rotta per ottenere le stecche di un tesserato (GET)
-router.get('/:id/stecca', authenticate, getStecche);
+// Rotta per ottenere le stecche di un tesserato (GET)
+router.get('/:id/stecca', authenticate, requireRole(['admin', 'presidente', 'tesserato']), getStecche);
 
 // Rotta per eliminare una stecca (DELETE)  ← AGGIUNGI QUI
-router.delete('/:id/stecca/:steccaId', authenticate, deleteStecca);
+router.delete('/:id/stecca/:steccaId', authenticate, requireRole(['tesserato']), deleteStecca);
 
 // Rotta per upload logo sponsor personale (POST) - solo eccellenze
-router.post('/:id/logo', authenticate, uploadLogo);  // ← AGGIUNTO
+router.post('/:id/logo', authenticate, requireRole(['tesserato']), uploadLogo);  // ← AGGIUNTO
 
 export default router;

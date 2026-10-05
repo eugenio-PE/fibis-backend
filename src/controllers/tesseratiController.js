@@ -467,12 +467,17 @@ export const addStecca = async (req, res) => {
 
         const { data: tesserato, error: checkError } = await supabaseAdmin
             .from('tesserati')
-            .select('id')
+            .select('id, user_id')
             .eq('id', id)
             .single();
 
         if (checkError || !tesserato) {
             return res.status(404).json({ error: 'Tesserato non trovato' });
+        }
+
+        // 🔐 Verifica che il tesserato stia operando su sé stesso
+        if (tesserato.user_id !== req.userId) {
+            return res.status(403).json({ error: 'Non autorizzato: puoi gestire solo le tue stecche' });
         }
 
         const { data, error } = await supabaseAdmin
@@ -511,6 +516,30 @@ export const getStecche = async (req, res) => {
     try {
         const { id } = req.params;
 
+        // 🔐 Recupera il ruolo dell'utente corrente
+        const { data: manutentore } = await supabaseAdmin
+            .from('manutentori')
+            .select('ruolo, asd_id')
+            .eq('user_id', req.userId)
+            .maybeSingle();
+
+        const isAdmin = manutentore?.ruolo === 'admin';
+        const isPresidente = manutentore?.ruolo === 'presidente';
+
+        // Se è admin o presidente, può vedere le stecche (presidente solo della sua ASD, RLS filtrerà)
+        // Altrimenti, verifica che sia il tesserato stesso
+        if (!isAdmin && !isPresidente) {
+            const { data: tesserato } = await supabaseAdmin
+                .from('tesserati')
+                .select('user_id')
+                .eq('id', id)
+                .single();
+
+            if (!tesserato || tesserato.user_id !== req.userId) {
+                return res.status(403).json({ error: 'Non autorizzato' });
+            }
+        }
+
         const { data, error } = await supabaseAdmin
             .from('stecche_tesserati')
             .select('*')
@@ -542,12 +571,17 @@ export const uploadLogo = async (req, res) => {
         // Verifica che il tesserato esista
         const { data: tesserato, error: checkError } = await supabaseAdmin
             .from('tesserati')
-            .select('id, categoria_ranking')
+            .select('id, categoria_ranking, user_id')
             .eq('id', id)
             .single();
 
         if (checkError || !tesserato) {
             return res.status(404).json({ error: 'Tesserato non trovato' });
+        }
+
+        // 🔐 Verifica che il tesserato stia operando su sé stesso
+        if (tesserato.user_id !== req.userId) {
+            return res.status(403).json({ error: 'Non autorizzato: puoi modificare solo il tuo logo' });
         }
 
         // Verifica che sia un'eccellenza
@@ -773,6 +807,17 @@ if (email) {
 export const deleteStecca = async (req, res) => {
   try {
     const { id, steccaId } = req.params;
+
+    // 🔐 Verifica che il tesserato stia operando su sé stesso
+    const { data: tesserato } = await supabaseAdmin
+      .from('tesserati')
+      .select('user_id')
+      .eq('id', id)
+      .single();
+
+    if (!tesserato || tesserato.user_id !== req.userId) {
+      return res.status(403).json({ error: 'Non autorizzato' });
+    }
 
     const { error } = await supabaseAdmin
       .from('stecche_tesserati')
