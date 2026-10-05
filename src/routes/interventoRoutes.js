@@ -418,7 +418,7 @@ router.post('/interventi/asd/:idAsd/calcola-esenzione', authenticate, requireRol
 // ============================================
 // GET STATO ESENZIONE ISI
 // ============================================
-router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
+router.get('/interventi/asd/:idAsd/biliardi-esenzione', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente']), async (req, res) => {
   try {
     const { idAsd } = req.params;
 
