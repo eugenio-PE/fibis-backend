@@ -13,7 +13,7 @@ const router = express.Router();
 // GET /api/gare (PUBBLICA PER APP TESSERATI)
 // Lista tutte le gare con filtri (disciplina, tipologia, regione, categoria, aperte)
 // ============================================================
-router.get('/gare', authenticate, async (req, res) => {
+router.get('/gare', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'direttore', 'tesserato']), async (req, res) => {
   try {
     const { disciplina, tipologia, regione, categoria, aperte } = req.query;
 
@@ -79,7 +79,7 @@ router.get('/gare', authenticate, async (req, res) => {
 // ============================================================
 
 // GET: Lista tutte le gare CON CONTEGGIO VERIFICHE (usata dalla Dashboard Admin)
-router.get('/gare-admin', authenticate, async (req, res) => {
+router.get('/gare-admin', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     console.log('🔵 GET /gare-admin - req.userId:', req.userId);
 
@@ -139,9 +139,21 @@ router.get('/gare-admin', authenticate, async (req, res) => {
 });
 
 // GET: Lista gare per ASD
-router.get('/gare/asd/:id', authenticate, async (req, res) => {
+router.get('/gare/asd/:id', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'direttore', 'arbitro']), async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 🔐 Controllo ASD per presidente
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('ruolo, asd_id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (manutentore?.ruolo === 'presidente' && parseInt(id) !== manutentore.asd_id) {
+      return res.status(403).json({ error: 'Non autorizzato per questa ASD' });
+    }
+
     const { data, error } = await supabaseAdmin
       .from('gare')
       .select(`
@@ -160,7 +172,7 @@ router.get('/gare/asd/:id', authenticate, async (req, res) => {
 });
 
 // GET: Lista gare per Direttore
-router.get('/gare/direttore/:id', authenticate, async (req, res) => {
+router.get('/gare/direttore/:id', authenticate, requireRole(['admin', 'settore_tecnico', 'direttore']), async (req, res) => {
   try {
     const { id } = req.params;
     const { data, error } = await supabaseAdmin
@@ -181,9 +193,29 @@ router.get('/gare/direttore/:id', authenticate, async (req, res) => {
 });
 
 // GET: Dettaglio di una gara
-router.get('/gare/:id', authenticate, async (req, res) => {
+router.get('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'direttore', 'arbitro']), async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 🔐 Controllo ASD per presidente
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('ruolo, asd_id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (manutentore?.ruolo === 'presidente') {
+      const { data: gara } = await supabaseAdmin
+        .from('gare')
+        .select('id_asd')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (!gara || gara.id_asd !== manutentore.asd_id) {
+        return res.status(403).json({ error: 'Non autorizzato per questa ASD' });
+      }
+    }
+
     const { data, error } = await supabaseAdmin
       .from('gare')
       .select(`
@@ -203,9 +235,29 @@ router.get('/gare/:id', authenticate, async (req, res) => {
 });
 
 // GET: Lista verifiche per gara (usata dalle app Flutter)
-router.get('/gare/:id/verifiche', authenticate, async (req, res) => {
+router.get('/gare/:id/verifiche', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'direttore']), async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 🔐 Controllo ASD per presidente
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('ruolo, asd_id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (manutentore?.ruolo === 'presidente') {
+      const { data: gara } = await supabaseAdmin
+        .from('gare')
+        .select('id_asd')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (!gara || gara.id_asd !== manutentore.asd_id) {
+        return res.status(403).json({ error: 'Non autorizzato per questa ASD' });
+      }
+    }
+
     const { data, error } = await supabaseAdmin
       .from('verifiche')
       .select(`
@@ -247,10 +299,21 @@ router.get('/gare/:id/verifiche-dettaglio', authenticate, requireRole(['admin'])
 });
 
 // GET: Lista verifiche per ASD (usata dal Presidente)
-router.get('/asd/:id/verifiche', authenticate, async (req, res) => {
+router.get('/asd/:id/verifiche', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'direttore']), async (req, res) => {
   try {
     const { id } = req.params;
-    
+
+    // 🔐 Controllo ASD per presidente
+    const { data: manutentore } = await supabaseAdmin
+      .from('manutentori')
+      .select('ruolo, asd_id')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (manutentore?.ruolo === 'presidente' && parseInt(id) !== manutentore.asd_id) {
+      return res.status(403).json({ error: 'Non autorizzato per questa ASD' });
+    }
+
     // 1. Prima ottieni i biliardi dell'ASD
     const { data: biliardi, error: biliardiError } = await supabaseAdmin
       .from('biliardi')
@@ -286,7 +349,7 @@ router.get('/asd/:id/verifiche', authenticate, async (req, res) => {
 });
 
 // POST: Crea una nuova gara
-router.post('/gare', authenticate, async (req, res) => {
+router.post('/gare', authenticate, requireRole(['admin', 'settore_tecnico']), async (req, res) => {
   try {
     const { id_asd, id_direttore, nulla_osta, tipologia, data_gara, note } = req.body;
 
@@ -376,9 +439,22 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
 
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
-      .select('ruolo')
+      .select('ruolo, asd_id')
       .eq('user_id', req.userId)
       .maybeSingle();
+
+    // 🔐 Controllo ASD per presidente
+    if (manutentore?.ruolo === 'presidente') {
+      const { data: gara } = await supabaseAdmin
+        .from('gare')
+        .select('id_asd')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (!gara || gara.id_asd !== manutentore.asd_id) {
+        return res.status(403).json({ error: 'Non autorizzato per questa ASD' });
+      }
+    }
 
     let query = supabaseAdmin
       .from('gare')
@@ -403,7 +479,7 @@ router.put('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico', '
 });
 
 // PUT: Assegna un direttore a una gara (per Presidenti ASD)
-router.put('/gare/:id/direttore', authenticate, async (req, res) => {
+router.put('/gare/:id/direttore', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente']), async (req, res) => {
   try {
     const { id } = req.params;
     const { id_direttore } = req.body;
@@ -488,6 +564,6 @@ router.delete('/gare/:id', authenticate, requireRole(['admin', 'settore_tecnico'
 // ============================================================
 // POST: Iscrizione automatica a una gara (solo per tesserati autenticati)
 // ============================================================
-router.post('/gare/:id/iscriviti', authenticate, iscrivitiGara);
+router.post('/gare/:id/iscriviti', authenticate, requireRole(['tesserato', 'admin']), iscrivitiGara);
 
 export default router;
