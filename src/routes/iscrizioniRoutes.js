@@ -1,7 +1,7 @@
 // src/routes/iscrizioniRoutes.js
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -9,11 +9,31 @@ const router = express.Router();
 // 🔥 NUOVA ROTTA: GET /api/iscrizioni/tesserato/:idTesserato
 // Recupera tutte le iscrizioni di un tesserato
 // ============================================================
-router.get('/tesserato/:idTesserato', authenticate, async (req, res) => {
+router.get('/tesserato/:idTesserato', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'tesserato']), async (req, res) => {
     try {
         const { idTesserato } = req.params;
 
         console.log(`🔵 GET /iscrizioni/tesserato/${idTesserato}`);
+
+        // 🔐 Controllo proprietario per tesserati (presidente e admin/settore_tecnico passano)
+        const { data: manutentore } = await supabaseAdmin
+            .from('manutentori')
+            .select('ruolo')
+            .eq('user_id', req.userId)
+            .maybeSingle();
+
+        if (!manutentore) {
+            // È un tesserato → verifica che stia vedendo le proprie iscrizioni
+            const { data: tesserato } = await supabaseAdmin
+                .from('tesserati')
+                .select('id')
+                .eq('user_id', req.userId)
+                .maybeSingle();
+
+            if (!tesserato || tesserato.id !== parseInt(idTesserato)) {
+                return res.status(403).json({ error: 'Non autorizzato' });
+            }
+        }
 
         const { data, error } = await supabaseAdmin
             .from('iscrizioni_gare')
@@ -37,7 +57,7 @@ router.get('/tesserato/:idTesserato', authenticate, async (req, res) => {
 // ============================================================
 // POST /api/iscrizioni/:id/giorno - Aggiorna il giorno scelto
 // ============================================================
-router.post('/:id/giorno', authenticate, async (req, res) => {
+router.post('/:id/giorno', authenticate, requireRole(['tesserato']), async (req, res) => {
     try {
         const { id } = req.params;
         const { giorno } = req.body;

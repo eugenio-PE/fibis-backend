@@ -375,7 +375,7 @@ router.delete('/admin/direttori/:id', authenticate, requireRole(['admin', 'setto
 });
 
 // GET: Lista direttori disponibili (per Presidenti ASD)
-router.get('/direttori/disponibili', authenticate, async (req, res) => {
+router.get('/direttori/disponibili', authenticate, requireRole(['presidente']), async (req, res) => {
   try {
     const { data: manutentore } = await supabaseAdmin
       .from('manutentori')
@@ -619,11 +619,7 @@ router.post('/admin/asd/:id/genera-qr', authenticate, requireRole(['admin']), as
     res.status(500).json({ error: error.message });
   }
 });
-// ============================================
-// ROTTA PUBBLICA PER QR
-// ============================================
-
-router.get('/asd/:qrCode', scanQR);
+// router.get('/asd/:qrCode', scanQR);  // ← rimossa: duplicata in interventoRoutes.js (protetta)
 
 
 // ROTTE PER BILIARDI

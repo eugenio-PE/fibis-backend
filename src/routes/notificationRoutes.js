@@ -1,6 +1,6 @@
 // src/routes/notificationRoutes.js
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import {
     saveDeviceToken,
     deleteDeviceToken,
@@ -23,6 +23,6 @@ router.delete('/device-token', authenticate, deleteDeviceToken);
 
 // Invia una notifica di test
 // POST /api/notifiche/test
-router.post('/test', authenticate, sendTestNotification);
+router.post('/test', authenticate, requireRole(['admin']), sendTestNotification);
 
 export default router;

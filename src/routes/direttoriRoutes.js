@@ -1,6 +1,6 @@
 import express from 'express';
 import { getMieGare } from '../controllers/direttoriController.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -12,6 +12,7 @@ const router = express.Router();
 router.get(
   '/mie-gare',
   authenticate,
+  requireRole(['direttore', 'arbitro', 'admin', 'settore_tecnico']),
   getMieGare
 );
 
