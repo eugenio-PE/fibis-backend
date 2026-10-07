@@ -26,9 +26,7 @@ router.get('/asd/:qrCode', authenticate, requireRole(['manutentore', 'direttore'
 // ============================================
 // ROTTE PROTETTE
 // ============================================
-router.get('/prodotti', async (req, res) => {
-  throw new Error('TEST SENTRY - errore forzato');
-});
+router.get('/prodotti', authenticate, requireRole(['admin', 'settore_tecnico', 'manutentore', 'presidente', 'direttore']), getProdotti);
 router.post('/verifica-lotto', authenticate, requireRole(['admin', 'settore_tecnico', 'manutentore', 'presidente', 'direttore']), verificaLotto);
 router.post('/interventi', authenticate, requireRole(['manutentore', 'admin', 'settore_tecnico']), requireOTP, registraIntervento);
 router.get('/storico/:asdId', authenticate, requireRole(['admin', 'settore_tecnico', 'presidente', 'manutentore']), getStorico);
