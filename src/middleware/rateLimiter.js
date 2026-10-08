@@ -91,7 +91,15 @@ export const globalLimiter = rateLimit({
   max: 500,                   // 500 richieste per IP
   standardHeaders,
   legacyHeaders,
-  skip: (req) => skipInDev() || isWhitelisted(req),
+  skip: (req) => {
+    // Skip in development
+    if (skipInDev()) return true;
+    // Skip whitelist
+    if (isWhitelisted(req)) return true;
+    // Skip health check (UptimeRobot)
+    if (req.path === '/api/health' || req.path === '/health') return true;
+    return false;
+  },
   handler: makeHandler('global', 'Troppe richieste. Riprova tra 15 minuti.'),
 });
 
